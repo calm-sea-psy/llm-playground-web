@@ -1,4 +1,4 @@
-# Seal_Frontend 작업 계획
+# llm-playground-web 작업 계획
 
 Seal_LLM(고객 문의 분류 + 답변 초안) API를 부르는 채팅형 화면. React + Vite + TypeScript + Tailwind CSS.
 ---
@@ -213,7 +213,7 @@ server: {
 ## 6. 폴더 구조 (예정)
 
 ```
-Seal_Frontend/
+llm-playground-web/
 ├── vite.config.ts
 ├── src/
 │   ├── api/client.ts          # health, answerStream(fetch + SSE 파서 + AbortController)

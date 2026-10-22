@@ -1,6 +1,6 @@
-# Seal_Frontend
+# llm-playground-web
 
-고객 문의를 분류하고 답변 초안을 만들어 주는 [Seal_LLM](https://github.com/theSealLLM/Seal_LLM) API의 채팅형 화면입니다. 상담원이 문의를 입력하면 분류 결과와 함께 답변이 스트리밍되고, 답변을 바로 복사해 쓸 수 있습니다.
+여러 LLM 프로젝트에 공통으로 붙여 쓰는 채팅형 프론트엔드입니다. 팀 프로젝트 [Seal_LLM](https://github.com/theSealLLM/Seal_LLM)의 화면(Seal_Frontend)으로 시작했으며, 지금은 Seal_LLM API 형식에 맞춰져 있습니다. 문의를 입력하면 분류 결과와 함께 답변이 스트리밍되고, 답변을 바로 복사해 쓸 수 있습니다.
 
 React 19 · Vite 8 · TypeScript · Tailwind CSS v4
 
