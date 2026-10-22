@@ -1,21 +1,21 @@
-import type { HealthState } from '../hooks/useHealth'
-import type { Conversation } from '../lib/chat'
-import { HistoryList } from './HistoryList'
-import { ServerStatus } from './ServerStatus'
+import { HistoryList } from "./HistoryList";
+import { ServerStatus } from "./ServerStatus";
+import type { HealthState } from "../hooks/useHealth";
+import type { Conversation } from "../lib/chat";
 
-type Props = {
-  health: HealthState
-  conversations: Conversation[]
-  currentId: string | null
-  activeId: string | null
-  onNewChat: () => void
-  onSelect: (id: string) => void
-  onRemove: (id: string) => void
+interface SidebarProps {
+  health: HealthState;
+  conversations: Conversation[];
+  currentId: string | null;
+  activeId: string | null;
+  onNewChat: () => void;
+  onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
   /** 방금 지운 대화 (실행 취소 안내) */
-  lastDeleted: Conversation | null
-  onUndoRemove: () => void
-  /** 내역 저장이 실패했는지 */
-  storageOk: boolean
+  lastDeleted: Conversation | null;
+  onUndoRemove: () => void;
+  /** 내역 저장이 성공했는지. false 면 경고를 보인다 */
+  isStorageOk: boolean;
 }
 
 /** 왼쪽 사이드바: 새 문의 · 문의 내역 · 서버 상태 */
@@ -29,15 +29,15 @@ export function Sidebar({
   onRemove,
   lastDeleted,
   onUndoRemove,
-  storageOk,
-}: Props) {
+  isStorageOk,
+}: SidebarProps) {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="p-3">
         <button
           type="button"
           onClick={onNewChat}
-          aria-current={currentId === null ? 'page' : undefined}
+          aria-current={currentId === null ? "page" : undefined}
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-left text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
         >
           + 새 문의
@@ -56,18 +56,22 @@ export function Sidebar({
       </nav>
 
       <div className="space-y-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
-        {lastDeleted && (
+        {lastDeleted ? (
           <div
             role="status"
             className="flex items-center justify-between gap-2 rounded-lg bg-zinc-200 px-3 py-1.5 text-xs dark:bg-zinc-800"
           >
             <span className="min-w-0 truncate">삭제됨: {lastDeleted.title}</span>
-            <button type="button" onClick={onUndoRemove} className="shrink-0 font-medium underline underline-offset-2">
+            <button
+              type="button"
+              onClick={onUndoRemove}
+              className="shrink-0 font-medium underline underline-offset-2"
+            >
               실행 취소
             </button>
           </div>
-        )}
-        {!storageOk && (
+        ) : null}
+        {isStorageOk ? null : (
           <p className="text-xs text-amber-700 dark:text-amber-400" role="status">
             내역을 저장하지 못했습니다 (브라우저 저장소를 쓸 수 없음)
           </p>
@@ -75,5 +79,5 @@ export function Sidebar({
         <ServerStatus state={health} />
       </div>
     </aside>
-  )
+  );
 }

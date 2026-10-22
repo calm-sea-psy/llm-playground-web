@@ -9,17 +9,21 @@ Seal_LLM(고객 문의 분류 + 답변 초안) API를 부르는 채팅형 화면
 Set-Location C:\Work\Seal_LLM; uv run uvicorn --app-dir src theseal.api.main:app --reload --port 8000
 ```
 
-| 메서드 | 경로 | 쓰임 |
-|---|---|---|
-| GET | `/health` | 서버 상태 (사이드바 아래) |
-| POST | `/api/answer/stream` | **기본 경로**. 답변 스트리밍 (SSE) |
-| POST | `/api/answer` | 스트리밍 없는 같은 처리 (JSON). 예비용 |
-| POST | `/api/classify` | 분류만. 화면에서는 안 써도 됨 |
+| 메서드 | 경로                 | 쓰임                                   |
+| ------ | -------------------- | -------------------------------------- |
+| GET    | `/health`            | 서버 상태 (사이드바 아래)              |
+| POST   | `/api/answer/stream` | **기본 경로**. 답변 스트리밍 (SSE)     |
+| POST   | `/api/answer`        | 스트리밍 없는 같은 처리 (JSON). 예비용 |
+| POST   | `/api/classify`      | 분류만. 화면에서는 안 써도 됨          |
 
 요청 본문 (`/api/answer`, `/api/answer/stream` 같음)
 
 ```json
-{ "text": "문의 원문 (1~2000자)", "provider": "local | openai (생략 시 서버 기본값)", "label": "생략. 넣으면 분류를 건너뜀 (테스트용)" }
+{
+  "text": "문의 원문 (1~2000자)",
+  "provider": "local | openai (생략 시 서버 기본값)",
+  "label": "생략. 넣으면 분류를 건너뜀 (테스트용)"
+}
 ```
 
 ### 1-1. 스트리밍 이벤트 (`text/event-stream`)
@@ -50,25 +54,49 @@ event: done            data: AnswerResponse   (마지막 한 번. 오류도 여�
 
 ```ts
 type Health = {
-  status: "ok"; classifier: string | null; classifier_device: string | null; classifier_error: string | null;
-  route_rule_enabled: boolean; verify_mode: "off" | "uncertain" | "all"; default_provider: "local" | "openai";
+  status: "ok";
+  classifier: string | null;
+  classifier_device: string | null;
+  classifier_error: string | null;
+  route_rule_enabled: boolean;
+  verify_mode: "off" | "uncertain" | "all";
+  default_provider: "local" | "openai";
 };
 
 type RoutingResult = {
-  label: "shipping" | "refund" | "account" | "unknown"; text: string; classifier_label: string;
-  scores: Record<string, number>;                // 분류기 확률 (보정 전)
-  route: { route: "confident" | "low_confidence" | "ambiguous" | "unknown"; p1: number; margin: number; reason: string } | null;
-  verification: { match: boolean; reason: string; final_label: string; latency_ms: number; error: string | null } | null;
+  label: "shipping" | "refund" | "account" | "unknown";
+  text: string;
+  classifier_label: string;
+  scores: Record<string, number>; // 분류기 확률 (보정 전)
+  route: {
+    route: "confident" | "low_confidence" | "ambiguous" | "unknown";
+    p1: number;
+    margin: number;
+    reason: string;
+  } | null;
+  verification: {
+    match: boolean;
+    reason: string;
+    final_label: string;
+    latency_ms: number;
+    error: string | null;
+  } | null;
 };
 
 type AnswerResponse = {
-  request_id: string; status: "ok" | "error"; label: string; answer: string | null;
-  provider: "local" | "openai"; model: string; prompt_version: string;
+  request_id: string;
+  status: "ok" | "error";
+  label: string;
+  answer: string | null;
+  provider: "local" | "openai";
+  model: string;
+  prompt_version: string;
   tools_used: { name: string; args: object; ok: boolean; error?: string | null; latency_ms: number }[];
-  latency_ms: number;                             // 답변 생성 시간 (분류 · 검증 제외)
+  latency_ms: number; // 답변 생성 시간 (분류 · 검증 제외)
   usage: { input_tokens: number | null; output_tokens: number | null };
   error: { code: string; message: string } | null;
-  created_at: string; classification: RoutingResult | null;
+  created_at: string;
+  classification: RoutingResult | null;
 };
 ```
 
@@ -77,12 +105,12 @@ type AnswerResponse = {
 
 ### 1-3. API 제약 (화면 설계에 영향)
 
-| 제약 | 대응 |
-|---|---|
-| 한 번에 문의 하나만 처리 (이전 대화 맥락 없음) | **문의 하나 = 대화 하나**. 같은 대화에서 다시 보내면 독립 문의로 처리됨을 입력창 아래 안내 |
-| 문의 내역 저장 API 없음 | localStorage (try/catch로 감싸고, 실패해도 화면은 동작) |
-| CORS 설정 없음 | 개발 중에는 Vite 프록시로 우회 |
-| Windows에서 `localhost`는 IPv6를 먼저 시도해 요청마다 약 2초 늦음 | 프록시 대상은 **`http://127.0.0.1:8000`** |
+| 제약                                                              | 대응                                                                                       |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 한 번에 문의 하나만 처리 (이전 대화 맥락 없음)                    | **문의 하나 = 대화 하나**. 같은 대화에서 다시 보내면 독립 문의로 처리됨을 입력창 아래 안내 |
+| 문의 내역 저장 API 없음                                           | localStorage (try/catch로 감싸고, 실패해도 화면은 동작)                                    |
+| CORS 설정 없음                                                    | 개발 중에는 Vite 프록시로 우회                                                             |
+| Windows에서 `localhost`는 IPv6를 먼저 시도해 요청마다 약 2초 늦음 | 프록시 대상은 **`http://127.0.0.1:8000`**                                                  |
 
 ---
 
@@ -116,6 +144,7 @@ type AnswerResponse = {
 ## 3. 필수 구현 사항 (사용자 요청)
 
 ### 3-1. 스트리밍 텍스트 UX
+
 - **답변 시작 전**: `status` 단계 문구 + 스켈레톤(`animate-pulse`).
   - `classifying` "문의를 분류하는 중..." → `answering` "답변을 작성하는 중..."
   - `adventure` "챗봇이 알 수 없는 것을 찾아 모험을 떠나는 중..." — 기다림이 길다(최대 수십 초). 별도 애니메이션 + 경과 시간 표시
@@ -127,12 +156,14 @@ type AnswerResponse = {
 - **커서 블링크**: 생성 중에만 텍스트 끝에 `█`(또는 `|`) 깜빡임. 표시가 끝나면(위 "표시 완료") 제거.
 
 ### 3-2. 스크롤 관리
+
 - **자동 하단 스크롤**: `scrollIntoView`는 바깥 페이지까지 스크롤할 수 있으므로, 메시지 목록 컨테이너의 `scrollTop`을 직접 바닥(`scrollHeight`)으로 맞춘다. 타이핑 중에는 즉시 이동하고, 새 메시지를 추가할 때만 `scrollTo({ behavior: 'smooth' })`를 쓴다(smooth가 겹치면 버벅인다).
 - **사용자 개입 감지**: 바닥 감시 요소의 보임 여부(`IntersectionObserver`)만으로 판단하면 안 된다. 글이 늘어나 감시 요소가 잠깐 밀려날 때도 "사용자가 위로 올렸다"고 오판한다.
   - 사용자 입력(`wheel` · `touchmove` · PageUp/↑ 키)이 있었고 위로 스크롤되어 바닥에서 일정 거리(예: 80px) 이상 떨어졌을 때만 자동 스크롤을 끈다.
   - 바닥으로 돌아오거나 "↓ 맨 아래로" 버튼을 누르면 다시 켠다.
 
 ### 3-3. 메시지 레이아웃 · 컴포넌트
+
 - **마크다운**: `react-markdown` + `remark-gfm`. 제목 · 굵게 · 목록 · 표를 Tailwind로 스타일(`@tailwindcss/typography`의 `prose`도 가능). **원시 HTML은 렌더링하지 않는다**(`rehype-raw` 쓰지 않음 → XSS 방지).
   - 참고: unknown 답변은 평문으로 지시되어 있고, 조원 프롬프트 답변(배송 · 환불 · 계정)에는 `**굵게**`가 섞여 나온다.
   - 스트리밍 도중 `**`가 아직 안 닫혀 잠깐 깨져 보일 수 있다 → 허용하거나, 생성 중에는 마지막 미완성 줄만 평문으로 그리는 정도로 처리.
@@ -142,6 +173,7 @@ type AnswerResponse = {
 - 메시지는 종류별 컴포넌트로 나눈다: `UserMessage` · `AssistantMessage`(마크다운 본문 + 메타) · `StatusMessage`(단계 · 스켈레톤) · `ErrorMessage`(다시 시도 버튼).
 
 ### 3-4. 입력창 UX
+
 - **자동 높이**: `textarea`의 `scrollHeight`로 높이 조절, 최대 높이(예: 200px)를 넘으면 스크롤.
 - **단축키**: Enter 전송, Shift+Enter 줄바꿈. **한글 IME 합성 중 Enter 무시**: `e.nativeEvent.isComposing || e.keyCode === 229`이면 return.
   - Safari에서는 `compositionend`가 keydown보다 먼저 와서 `isComposing`이 `false`로 들어온다(마지막 글자가 두 번 전송되는 버그). `compositionend` 직후 같은 틱의 Enter도 무시한다(플래그를 두고 `setTimeout(0)`으로 해제).
@@ -149,23 +181,26 @@ type AnswerResponse = {
 - 빈 문장 · 공백만 · 2000자 초과는 보내기 전에 막고 글자 수 표시.
 
 ### 3-5. 상태 관리 · 성능
+
 - **채팅 히스토리**: 대화 = `{ id, title, createdAt, messages: Message[] }`. 메시지는 아래와 같다.
 
   ```ts
   type Message = {
-    id: string; role: "user" | "assistant";
-    content: string;                                // 화면에 보이는 글 (타이핑 효과가 흘린 만큼)
+    id: string;
+    role: "user" | "assistant";
+    content: string; // 화면에 보이는 글 (타이핑 효과가 흘린 만큼)
     status: "pending" | "streaming" | "done" | "error" | "stopped";
     stage?: "classifying" | "answering" | "adventure"; // pending일 때 단계 문구 · 스켈레톤
-    classification?: RoutingResult;                 // classification 이벤트 (done 전에 배지 미리 표시 가능)
-    provider?: "local" | "openai";                  // 보낸 모델 (다시 생성 · 비교용)
-    meta?: AnswerResponse;                          // done
-    error?: { code: string; message: string };      // 오류 안내 (네트워크 실패는 code "network_error")
+    classification?: RoutingResult; // classification 이벤트 (done 전에 배지 미리 표시 가능)
+    provider?: "local" | "openai"; // 보낸 모델 (다시 생성 · 비교용)
+    meta?: AnswerResponse; // done
+    error?: { code: string; message: string }; // 오류 안내 (네트워크 실패는 code "network_error")
   };
   ```
 
   - `pending`: 보냈고 delta가 아직 없음(단계 문구 표시). `streaming`: 타이핑 중. 수신된 전체 글(버퍼)은 `useTypewriter` 안에 둔다(3-1).
   - 스트리밍 중 갱신은 해당 메시지만 바꾼다(불변 업데이트, 메시지 컴포넌트 `memo`).
+
 - delta마다 localStorage에 쓰지 않는다 → done · 오류 · 중지 시점에만 저장.
 - **불러올 때 보정**: 저장본에 `pending` · `streaming` 메시지가 남아 있으면(저장 도중 탭 종료 등) `stopped`로 바꿔서 불러온다.
 - **가상 스크롤**: 이 API는 문의 하나 = 대화 하나라서 한 대화가 수백 개가 되기는 어렵다. 우선 넣지 않고, 메시지 목록을 한 컴포넌트로 감싸 두어 나중에 `@tanstack/react-virtual`로 바꾸기 쉽게만 한다. 사이드바 문의 내역이 수백 개가 되면 그쪽에 먼저 적용.
@@ -255,20 +290,21 @@ llm-playground-web/
 
 ## 8. 확인용 문의 예시
 
-| 문의 | 기대 |
-|---|---|
-| 주문한 지 일주일이 넘었는데 계속 배송 준비 중이에요. | shipping, delta 스트리밍 |
-| 오늘 날씨가 안좋아서 배송이 안되려나? | shipping (LLM 검증 통과), 스트리밍 |
-| 오늘 무슨 요일이에요? | unknown → adventure 문구 → 날짜 툴 → 한 번에 답변 |
-| 서울 날씨 어때요? | unknown → 날씨 툴 (기상청 키 필요) |
-| (빈 문장) | 보내기 전에 막힘 (서버로 가도 400) |
-| Ollama를 끄고 전송 | done 오류 `llm_error` 안내 |
+| 문의                                                 | 기대                                              |
+| ---------------------------------------------------- | ------------------------------------------------- |
+| 주문한 지 일주일이 넘었는데 계속 배송 준비 중이에요. | shipping, delta 스트리밍                          |
+| 오늘 날씨가 안좋아서 배송이 안되려나?                | shipping (LLM 검증 통과), 스트리밍                |
+| 오늘 무슨 요일이에요?                                | unknown → adventure 문구 → 날짜 툴 → 한 번에 답변 |
+| 서울 날씨 어때요?                                    | unknown → 날씨 툴 (기상청 키 필요)                |
+| (빈 문장)                                            | 보내기 전에 막힘 (서버로 가도 400)                |
+| Ollama를 끄고 전송                                   | done 오류 `llm_error` 안내                        |
 
 ---
 
 ## 9. 구현 메모 (계획서에 없던 것 · 정한 값 · 실측)
 
 ### 1단계 (2026-10-13)
+
 - **TypeScript는 7이 아니라 6.0.3** — npm 최신은 7.0.2지만, `create-vite@9.2.1`의 react-ts 템플릿이 `~6.0.2`를 쓴다. 템플릿 설정(`tsconfig.*`)과 맞추려고 6으로 고정했다.
 - **린트는 oxlint** — 템플릿 기본값(ESLint 대신 `oxlint` + `.oxlintrc.json`)을 그대로 따랐다.
 - **프로젝트는 손으로 구성** — 폴더에 계획서가 있어 `create-vite`가 빈 폴더가 아니라고 묻는다. 임시 폴더에 템플릿을 만들어 설정 파일만 복사했다(데모 화면 · 이미지 제외).
@@ -279,6 +315,7 @@ llm-playground-web/
 - 개발 서버 실행 설정: `.claude/launch.json` (`npm run dev`, 5173).
 
 ### 2단계 (2026-10-13)
+
 - **`answerStream`의 반환 · 오류 규칙** — 서버가 보낸 오류(HTTP 400 입력 오류, `done(status="error")`)는 예외가 아니라 `AnswerResponse`로 돌려준다. done을 받지 못한 경우만 `AnswerStreamError`를 던진다. 코드: `aborted`(중지) · `network`(연결 실패 · 끊김 · 프록시 5xx) · `incomplete`(done 없이 끝남) · `bad_response`(JSON 아님 · done 형식 오류). 화면은 둘을 같은 오류 안내로 합친다(4-4).
 - 모르는 이벤트 이름은 무시한다(서버가 이벤트를 추가해도 깨지지 않게).
 - 줄 끝은 `\r\n`뿐 아니라 `\r`만 있는 경우도 받는다. 끝의 `\r`은 다음 조각의 `\n`과 짝일 수 있어 스트림이 끝날 때까지 보류한다.
@@ -290,6 +327,7 @@ llm-playground-web/
   - 중지: 세 번째 delta에서 `abort()` → `aborted`. 서버 로그에는 연결 끊김이 남지 않아 서버 쪽 생성이 실제로 멈췄는지는 확인하지 못했다.
 
 ### 3단계 (2026-10-13)
+
 - **글자 수는 앞뒤 공백을 지운 뒤 코드 포인트로 센다** — 서버(`TextRequest`)가 `strip()` 뒤 Python `len`으로 검증한다. JS `length`는 이모지를 2로 세므로 `Array.from(text).length`를 쓴다. 보낼 때도 앞뒤 공백을 지운 글을 보낸다.
 - **다시 시도 · 다시 받기는 같은 자리에서** — 오류 · 중지된 답변 메시지를 `pending`으로 되돌려 같은 문의 · 같은 모델로 다시 받는다(새 메시지를 추가하지 않음). 비교용 "다시 생성 / 모델 바꿔 다시"(4-3)는 7단계에서 새 메시지로 추가한다.
 - **`retry`는 최신 대화를 ref로 읽는다** — 메시지가 바뀔 때마다 `retry`가 새로 만들어지면 `memo`된 메시지 컴포넌트가 모두 다시 그려진다.
@@ -307,6 +345,7 @@ llm-playground-web/
   - **실제 한글 IME 입력은 확인하지 못했다** — 브라우저 자동화 도구는 IME 합성 없이 글자를 넣는다. 사람이 직접 한글을 치고 Enter로 확인해야 한다(Chrome · Edge, 가능하면 Safari).
 
 ### 4단계 (2026-10-13)
+
 - **속도 값**: 기본 초당 50자(`TYPEWRITER_BASE_CPS`), 밀린 글자를 0.6초 안에 따라잡는 속도(`TYPEWRITER_CATCHUP_SEC`). 화면 글은 도착보다 최대 약 0.6초 뒤처진다. 2단계 실측(로컬 Gemma 약 400자/초)에 맞췄다.
 - **수신과 표시를 나눈 위치**: `useChat`은 받은 글 전체를 `content`에 저장하고(저장 · 복사 기준), `AssistantMessage`가 `useTypewriter`로 흘린다. 커서와 메타 줄은 "표시 완료"(`caughtUp`) 기준.
 - **애니메이션 루프는 delta마다 새로 시작하지 않는다** — 처음 구현에서 delta(약 10ms 간격)마다 effect가 루프를 다시 시작해 첫 프레임 경과 시간 0이 반복되어 글이 거의 흐르지 않는 결함을 찾았다. 루프가 돌고 있으면 그대로 두고, 루프는 다음 프레임에 늘어난 `total`을 읽는다. 회귀 테스트: "조각이 10ms마다 계속 붙어도 멈추지 않고 흘러간다".
@@ -319,6 +358,7 @@ llm-playground-web/
 - **실측 (rAF를 16ms 타이머로 바꿔 측정, 로컬 Gemma)**: 배송 문의 692자 — 첫 글자 0.6초, 서버 전송 끝 4.5초(약 170자/초), 화면 표시 끝 5.8초(서버보다 1.3초 늦음 — 끝부분은 밀린 글자가 적어 기본 속도 50자/초로 흐름). 커서는 표시 끝까지 붙어 있다가 메타 줄과 함께 바뀐다. 끝부분이 느리게 느껴지면 기본 속도를 올린다.
 
 ### 5단계 (2026-10-13)
+
 - **결정: 복사는 (다)** — 서식 있는 글(HTML)과 평문을 함께 클립보드에 넣는다(`ClipboardItem`). 안 되면 평문만 `writeText`, 그것도 안 되면 `execCommand('copy')`. 복사 내용은 저장된 `content`가 아니라 **렌더링된 DOM**에서 만든다 — 평문은 굵게 · 제목 기호를 지우고 목록 "- " · "1. ", 표는 탭으로(`toPlainText`), HTML은 class와 복사 버튼을 뺀다(`toCopyHtml`).
 - 복사 버튼은 표시 완료(done) · 중지된 답변(받은 데까지)에만, 받는 중에는 숨긴다.
 - **줄바꿈 한 번도 줄바꿈으로 보인다** — 마크다운은 문단 안 `\n`을 공백으로 합치지만 LLM 답변은 줄바꿈 한 번으로 줄을 나눈다. 패키지(`remark-breaks`)를 늘리지 않고 `p` · `li`에 `white-space: pre-line`.
@@ -336,10 +376,12 @@ llm-playground-web/
 - **확인하지 못한 것**: 패널이 숨겨져 있어 다크 · 라이트 모드의 `prose` 색과 커서 위치를 눈으로 보지 못했다. 복사한 글을 실제 붙여 넣기 대상(메모장 · 서식 있는 입력창)에 붙여 보지 못했다.
 
 ### 6단계 결정 (2026-10-13)
+
 - 답변을 받는 도중 다른 대화로 옮기거나 새 문의를 눌러도 **답변은 원래 대화에서 계속 받는다**(나). 요청은 한 번에 하나 — 받는 동안 다른 대화의 입력창은 전송을 막고 안내한다. 중지 버튼은 받는 중인 대화에서만.
 - 여러 탭 동기화(`storage` 이벤트)는 넣지 않는다.
 
 ### 6단계 (2026-10-13)
+
 - **파일 구성이 계획과 다르다** — 계획의 `hooks/useHistory.ts` 대신 저장 · 불러오기 · 보정은 순수 함수 `lib/history.ts`로, 대화 목록 상태는 `useChat`이 가진다. 답변 이벤트가 "대화 id + 메시지 id"로 목록 안의 메시지를 바꿔야 해서(결정 (나)) 상태를 한 곳에 두는 편이 단순했다.
 - **저장 형식**: 키 `seal-frontend:conversations:v1`(`{ version: 1, conversations }`), 마지막으로 보던 대화 `seal-frontend:current:v1`. `Conversation`에 `updatedAt`(문의를 보낸 · 답변이 끝난 시각) 추가 — 사이드바 정렬 기준. 예전 저장본에 없으면 `createdAt`으로 채운다.
 - **저장 시점**: 보낸 직후(답변 도중 탭이 닫혀도 문의는 남게) · done · 오류 · 중지 · 삭제 · 실행 취소. `saveRef` 표시를 켠 갱신만 커밋 뒤 effect에서 저장한다. delta · status는 저장하지 않는다(테스트로 `setItem` 횟수 확인).
@@ -353,11 +395,13 @@ llm-playground-web/
 - 측정 메모: 스크립트로 `click()`한 직후에는 React가 아직 화면을 바꾸지 않았다(마이크로태스크 뒤 반영). "답변 끝남"을 DOM으로 기다릴 때는 시작 표시가 나타난 것부터 확인해야 한다.
 
 ### 7단계 결정 (2026-10-13)
+
 - 다시 생성한 답변은 **대화 끝에 새 문의 + 답변 쌍으로 추가**(가). 문의 말풍선에 "다시 생성" 표시.
 - **"모델 바꿔 다시 받기"(local ↔ openai)는 넣지 않는다** — 지금 서버 구성에서는 동작하지 않을 것 같다는 사용자 판단(2026-10-13). 같은 모델로 다시 생성만.
 - 6단계에서 남긴 "받는 중인 대화로 돌아오면 처음부터 다시 타이핑"도 고친다(메시지별 표시 위치 기억).
 
 ### 7단계 (2026-10-13)
+
 - **처리 과정 배지 · 펼침(`MessageMeta`)**: 배지 = 라벨 · 경로 · 검증 결과 · 답변 시간 · 툴 · 모델. 펼침은 `<details>`(키보드 · 스크린 리더 기본 지원) — 분류기 확률(보정 전) 막대, 경로 규칙(p1은 **보정 후** — 실측에서 분류기 92.8%인데 p1 71.7%라 표시를 나눴다), LLM 검증, 툴 호출(args JSON), 토큰, 프롬프트 버전, 요청 id, **화면에서 잰 전체 시간**(`finishedAt - createdAt`, 메시지에 `finishedAt` 추가).
   - 범위 밖 문의는 라벨과 경로 이름이 둘 다 "범위 밖"이라 경로 배지를 생략한다.
   - 실측: baseline(CPU) 분류기에서는 전체 시간과 답변 생성 시간 차이가 9~10ms(분류가 거의 0초). BERT 분류기 때는 약 330ms였다.
@@ -370,3 +414,15 @@ llm-playground-web/
 - **찾아서 고친 결함 — StrictMode 이중 실행이 요청을 중지**: 페이지를 막 연 직후 다시 생성을 누르면 60ms 만에 "중지됨". `fetch`의 abort 호출 경로를 찍어 보니 `useChat`의 "정리할 때 요청 중지" 코드가 개발 모드 StrictMode의 이펙트 이중 실행(`doubleInvokeEffectsOnFiber`) 중에 불렸다. 패널이 숨겨져 첫 이펙트 처리가 늦어진 사이에 요청이 시작된 경우. 앱은 페이지를 닫을 때만 사라지고 그때는 브라우저가 요청을 끊으므로 정리 때 중지를 뺐다. 배포 빌드에는 이중 실행이 없지만 같은 구조의 정리 코드는 피한다. (타이밍 재현이 어려워 자동 테스트는 없음)
 - **실측 (브라우저, 로컬 Gemma)**: "오늘 날씨가 안좋아서 배송이 안되려나?" → 배송 · 확신(p1 71.7%, margin 56.6%) · 1.8초. "서울 날씨 어때요?" → 범위 밖 · `get_weather`(서울, 1.6초) · 12.8초 · 토큰 3715/872. 완료 알림 영역에 "답변 완료: …" 한 번. 다시 생성 → 끝에 새 쌍, adventure 후 14.5초에 답변. 375px: 가로 넘침 없음, 덮개 열기 · 내역 선택으로 닫힘 · Esc로 닫고 햄버거로 포커스 복귀.
 - **확인하지 못한 것**: `llm_error` 실제 화면(Ollama를 꺼야 함 — 백엔드 쪽이라 직접 끄지 않음). 패널이 숨겨져 있어 다크 · 라이트 색과 덮개 애니메이션을 눈으로 보지 못했다(숨겨진 패널은 CSS 전환도 멈춘다 — `getAnimations().finish()`로 최종 위치만 확인).
+
+## 리팩터링 (2026-10-22)
+
+react-conventions 기준으로 전체를 다시 정리했다. 위 단계별 메모의 "린트는 oxlint" 등은 이 시점에 바뀌었다.
+
+- **목업이 기본** — 서버는 나중에 붙인다. `ApiClient` 인터페이스(`api/client.ts`)를 두고 `httpClient.ts`(실제 서버) · `mockClient.ts`(목업)를 `main.tsx`에서 골라 `ApiProvider`로 끼운다. `VITE_API_MODE=http`면 실제 서버.
+- **서버 응답은 경계에서 검증 · 변환** — `api/schemas.ts`(zod)가 snake_case 를 camelCase 로 바꾼다. 화면 코드에는 snake_case 가 없다. done 뿐 아니라 status · classification · delta 이벤트도 형식이 틀리면 `bad_response`.
+- **저장 형식 v2** — 키 `seal-frontend:conversations:v2`. v1 저장본은 불러올 때 메타를 변환하고 다음 저장 때 v1 키를 지운다.
+- **린트 · 포맷** — oxlint → ESLint(`eslint.config.mjs` + `.eslint/base.mjs`) + Prettier(`.prettierrc.json`, Tailwind 클래스 정렬).
+- 훅 정리: `useDrawer` · `useAnnouncer` 분리, `useReducedMotion` · 테마의 OS 다크 감지는 `useMediaQuery` 재사용, 타이핑 진행 위치는 모듈 Map 대신 `TypewriterMemoryProvider`.
+- 좁은 화면 덮개가 열린 채로 넓은 화면이 되었다가 다시 좁아지면 덮개가 다시 열린 상태로 보인다 (이전에는 닫혔다). 열림 여부를 렌더 중 setState 없이 파생값으로 계산하게 바꾸면서 생긴 차이.
+- 백엔드 `llm/pilsoo` 브랜치(3143f63)는 done 응답을 6개 필드로 줄였다. 이 화면의 스키마는 origin/main 형식 기준이라, 그 브랜치에 붙이면 done 이 `bad_response`가 된다. 서버를 붙일 때 `schemas.ts`를 맞춘다.

@@ -8,10 +8,12 @@
     <script>
       // React가 뜨기 전에 테마를 붙여 처음 열 때 깜빡이지 않게 한다 (useTheme과 같은 키 · 규칙)
       try {
-        var theme = localStorage.getItem('seal-frontend:theme')
-        var dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
-        document.documentElement.classList.toggle('dark', dark)
-        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        var theme = localStorage.getItem("seal-frontend:theme");
+        var dark =
+          theme === "dark" ||
+          (theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
       } catch (e) {}
     </script>
   </head>

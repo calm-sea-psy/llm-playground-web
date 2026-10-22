@@ -1,17 +1,16 @@
-import { errorGuide } from '../../lib/labels'
+import type { AnswerError } from "../../api/types";
+import { errorGuide } from "../../lib/labels";
+
+interface ErrorMessageProps {
+  error: AnswerError;
+  onRetry?: () => void;
+  isRetryDisabled?: boolean;
+}
 
 /** 오류 안내: 코드별 안내 문장 + 서버 원문(작게) + 다시 시도 (다시 보내도 같은 결과인 입력 오류는 버튼 없음) */
-export function ErrorMessage({
-  error,
-  onRetry,
-  retryDisabled,
-}: {
-  error: { code: string; message: string }
-  onRetry?: () => void
-  retryDisabled?: boolean
-}) {
-  const guide = errorGuide(error.code)
-  const detail = error.message && error.message !== guide.text ? error.message : null
+export function ErrorMessage({ error, onRetry, isRetryDisabled = false }: ErrorMessageProps) {
+  const guide = errorGuide(error.code);
+  const detail = error.message && error.message !== guide.text ? error.message : null;
 
   return (
     <div
@@ -20,22 +19,22 @@ export function ErrorMessage({
     >
       <div className="min-w-0 flex-1 space-y-1">
         <p className="font-medium">{guide.text}</p>
-        {detail && (
+        {detail ? (
           <p className="text-xs break-words opacity-75">
             {detail} <span className="opacity-70">({error.code})</span>
           </p>
-        )}
+        ) : null}
       </div>
-      {onRetry && guide.retry && (
+      {onRetry && guide.retry ? (
         <button
           type="button"
           onClick={onRetry}
-          disabled={retryDisabled}
+          disabled={isRetryDisabled}
           className="shrink-0 rounded-lg border border-red-300 px-3 py-1 text-xs font-medium hover:bg-red-100 disabled:opacity-40 dark:border-red-800 dark:hover:bg-red-900/50"
         >
           다시 시도
         </button>
-      )}
+      ) : null}
     </div>
-  )
+  );
 }

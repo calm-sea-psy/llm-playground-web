@@ -18,7 +18,7 @@ React 19 · Vite 8 · TypeScript · Tailwind CSS v4
 ## 준비
 
 - Node.js 24 이상 (개발: 24.19)
-- 실행 중인 Seal_LLM API (기본 `http://127.0.0.1:8000`)
+- (실제 서버에 붙일 때만) 실행 중인 Seal_LLM API (기본 `http://127.0.0.1:8000`)
 
 ```bash
 npm install
@@ -26,40 +26,52 @@ npm install
 
 ## 실행
 
-API 서버를 먼저 띄웁니다. Seal_LLM 폴더에서 실행합니다.
-
-```bash
-uv run uvicorn --app-dir src theseal.api.main:app --reload --port 8000
-```
-
-그다음 이 폴더에서 화면 개발 서버를 띄우고 http://localhost:5173 을 엽니다.
+기본은 **목업 모드**입니다. 서버 없이 화면 개발 서버만 띄우고 http://localhost:5173 을 엽니다.
 
 ```bash
 npm run dev
 ```
 
+목업([src/api/mockClient.ts](src/api/mockClient.ts))은 실제 서버와 같은 순서로 이벤트를 흘립니다.
+
+| 문의 내용                                       | 흐름                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------- |
+| "배송" · "환불" · "반품" · "계정" · "로그인" 등 | 해당 라벨로 분류 → 답변을 조각으로 흘림                       |
+| 그 밖                                           | 범위 밖(adventure): 3초 기다린 뒤 툴 호출 기록과 함께 한 번에 |
+| "오류"가 들어 있음                              | `done(status="error", llm_error)`                             |
+
+## 실제 서버에 붙이기
+
+`.env.local`에 `VITE_API_MODE=http`를 넣고 Seal_LLM API 서버를 띄운 뒤 개발 서버를 다시 시작합니다. Seal_LLM 폴더에서:
+
+```bash
+uv run uvicorn --app-dir src theseal.api.main:app --reload --port 8000
+```
+
 사이드바 아래에 "● 서버 정상"이 보이면 연결된 것입니다. API 서버가 꺼져 있으면 "연결 안 됨"으로 표시되고, 서버가 올라오면 30초 안에 자동으로 바뀝니다.
 
-## API 주소 설정
+| 상황                        | 방법                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 개발 서버(`npm run dev`)    | 설정 없이 Vite 프록시가 `/api` · `/health`를 `http://127.0.0.1:8000`으로 넘긴다 ([vite.config.ts](vite.config.ts)) |
+| API를 다른 주소에서 띄울 때 | `.env.local`에 `VITE_API_BASE=http://주소:포트` (끝의 `/`는 빼도 됨)                                               |
 
-| 상황 | 방법 |
-|---|---|
-| 개발 서버(`npm run dev`) | 설정 없이 Vite 프록시가 `/api` · `/health`를 `http://127.0.0.1:8000`으로 넘긴다 ([vite.config.ts](vite.config.ts)) |
-| API를 다른 주소에서 띄울 때 | `.env.local`에 `VITE_API_BASE=http://주소:포트` (끝의 `/`는 빼도 됨) |
+서버 응답(snake_case)은 [src/api/schemas.ts](src/api/schemas.ts)가 zod로 검증하고 화면 형식(camelCase)으로 바꿉니다. 서버 응답 형식이 바뀌면 이 파일만 고칩니다.
 
 - 프록시 대상을 `localhost`가 아니라 `127.0.0.1`로 둔 이유: Windows에서 `localhost`는 IPv6를 먼저 시도해 요청마다 약 2초 늦어진다.
 - `VITE_API_BASE`로 API를 직접 부르면 브라우저가 CORS를 확인한다. Seal_LLM은 `.env`의 `API_CORS_ORIGINS`(쉼표로 구분)에 있는 주소만 허용하며, 기본값은 `localhost` · `127.0.0.1`의 5173 · 3000번 포트다. **`npm run preview`(4173번)나 배포 주소에서 쓰려면 그 주소를 `API_CORS_ORIGINS`에 추가**해야 한다.
 
 ## 스크립트
 
-| 명령 | 하는 일 |
-|---|---|
-| `npm run dev` | 개발 서버 (5173) |
-| `npm run build` | 타입 검사 후 `dist/`에 빌드 |
-| `npm run preview` | 빌드 결과 미리보기 (4173, 위 CORS 참고) |
-| `npm test` | 테스트 한 번 실행 (Vitest) |
-| `npm run test:watch` | 파일이 바뀔 때마다 테스트 |
-| `npm run lint` | 린트 (oxlint) |
+| 명령                 | 하는 일                                  |
+| -------------------- | ---------------------------------------- |
+| `npm run dev`        | 개발 서버 (5173)                         |
+| `npm run build`      | 타입 검사 후 `dist/`에 빌드              |
+| `npm run preview`    | 빌드 결과 미리보기 (4173, 위 CORS 참고)  |
+| `npm test`           | 테스트 한 번 실행 (Vitest)               |
+| `npm run test:watch` | 파일이 바뀔 때마다 테스트                |
+| `npm run lint`       | 린트 (ESLint). `lint:fix`는 자동 수정    |
+| `npm run format`     | 포맷 (Prettier). `format:check`는 검사만 |
+| `npm run typecheck`  | 타입 검사 (`tsc -b`)                     |
 
 테스트는 API 계층은 Node 환경, 화면은 jsdom 환경에서 돈다(파일 첫 줄 `// @vitest-environment jsdom`). jsdom 준비 때문에 전체 실행에 약 20초가 걸린다.
 
@@ -68,23 +80,32 @@ npm run dev
 ```
 src/
 ├── api/
-│   ├── client.ts        # /health, /api/answer/stream (fetch + SSE, 중지)
+│   ├── client.ts        # 화면이 쓰는 API 계약 (ApiClient) · AnswerStreamError
+│   ├── httpClient.ts    # 실제 서버: /health, /api/answer/stream (fetch + SSE, 중지)
+│   ├── mockClient.ts    # 목업: 서버 없이 같은 이벤트 흐름
+│   ├── schemas.ts       # 서버 응답 검증 · snake_case → camelCase 변환 (zod)
 │   ├── sse.ts           # SSE 파서 (바이트 조각 → 이벤트)
-│   └── types.ts         # API 응답 형식
+│   └── types.ts         # 화면 안의 API 데이터 형식
+├── providers/           # ApiProvider (클라이언트 주입) · TypewriterMemoryProvider
+├── hooks/
+│   ├── useApi.ts        # ApiProvider 가 끼운 클라이언트
 ├── hooks/
 │   ├── useChat.ts       # 대화 목록 · 전송 · 중지 · 다시 시도 · 다시 생성 · 삭제
 │   ├── useHealth.ts     # 서버 상태 주기 확인
 │   ├── useTypewriter.ts # 타이핑 효과
 │   ├── useAutoScroll.ts # 자동 스크롤 + 사용자 개입 감지
-│   └── useTheme.ts …    # 테마 · 미디어 쿼리 · 움직임 줄이기 · 현재 시각
+│   ├── useDrawer.ts     # 좁은 화면 사이드바 덮개
+│   └── useTheme.ts …    # 테마 · 미디어 쿼리 · 움직임 줄이기 · 현재 시각 · 스크린 리더 알림
 ├── lib/
 │   ├── config.ts        # 설정값 (API 주소, 타이핑 속도, 스크롤 거리 등)
 │   ├── labels.ts        # 화면 표시 이름 (라벨 · 경로 · 툴 · 오류 안내)
-│   ├── history.ts       # 문의 내역 저장 · 불러오기
+│   ├── history.ts       # 문의 내역 저장 · 불러오기 (v2, v1 저장본은 자동 변환)
 │   ├── markdown.ts      # 타이핑 중 서식 닫기 · 복사용 평문/HTML
 │   └── chat.ts · clipboard.ts
 ├── components/          # Sidebar, ChatView, Composer, Markdown, MessageMeta, messages/ …
-└── App.tsx
+├── test/                # 테스트용 가짜 API 클라이언트 · Provider 래퍼
+├── App.tsx
+└── main.tsx             # API 클라이언트를 만들어 Provider 로 끼운다 (VITE_API_MODE)
 ```
 
 ## 알아 둘 점
