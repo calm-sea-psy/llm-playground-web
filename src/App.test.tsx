@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // 앱 전체: 테마 전환 · 좁은 화면 덮개(drawer). /health는 실패하게 두고(연결 안 됨) 화면 동작만 본다.
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -63,8 +64,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("테마", () => {
-  it("시스템이면 OS 설정을 따라가고, 고르면 저장한다", () => {
+describe("App", () => {
+  it("테마: 시스템이면 OS 설정을 따라가고, 고르면 저장한다", async () => {
+    const user = userEvent.setup();
     const media = stubMatchMedia({ desktop: true, systemDark: false });
     renderApp();
     const root = document.documentElement;
@@ -76,25 +78,23 @@ describe("테마", () => {
     expect(root.classList.contains("dark")).toBe(true);
     expect(root.style.colorScheme).toBe("dark");
 
-    fireEvent.change(select, { target: { value: "light" } });
+    await user.selectOptions(select, "light");
     expect(root.classList.contains("dark")).toBe(false);
     expect(localStorage.getItem(THEME_KEY)).toBe("light");
 
-    fireEvent.change(select, { target: { value: "system" } });
+    await user.selectOptions(select, "system");
     expect(root.classList.contains("dark")).toBe(true);
     expect(localStorage.getItem(THEME_KEY)).toBeNull();
   });
 
-  it("저장된 테마로 시작한다", () => {
+  it("테마: 저장된 테마로 시작한다", () => {
     localStorage.setItem(THEME_KEY, "dark");
     stubMatchMedia({ desktop: true, systemDark: false });
     renderApp();
     expect(screen.getByLabelText<HTMLSelectElement>("화면 테마").value).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
-});
 
-describe("좁은 화면", () => {
   it("넓은 화면에는 햄버거 버튼이 없고 사이드바가 바로 보인다", () => {
     stubMatchMedia({ desktop: true, systemDark: false });
     renderApp();
@@ -102,7 +102,8 @@ describe("좁은 화면", () => {
     expect(document.getElementById("sidebar")!.hasAttribute("inert")).toBe(false);
   });
 
-  it("햄버거로 덮개를 열고, Esc로 닫으면 포커스가 햄버거로 돌아온다", () => {
+  it("좁은 화면: 햄버거로 덮개를 열고, Esc로 닫으면 포커스가 햄버거로 돌아온다", async () => {
+    const user = userEvent.setup();
     stubMatchMedia({ desktop: false, systemDark: false });
     renderApp();
     const sidebar = document.getElementById("sidebar")!;
@@ -110,26 +111,27 @@ describe("좁은 화면", () => {
     expect(sidebar.hasAttribute("inert")).toBe(true); // 닫힌 덮개 안으로 Tab이 들어가지 않게
     expect(menu.getAttribute("aria-expanded")).toBe("false");
 
-    fireEvent.click(menu);
+    await user.click(menu);
     expect(sidebar.hasAttribute("inert")).toBe(false);
     expect(menu.getAttribute("aria-expanded")).toBe("true");
     expect(sidebar.contains(document.activeElement)).toBe(true);
 
-    fireEvent.keyDown(document, { key: "Escape" });
+    await user.keyboard("{Escape}");
     expect(sidebar.hasAttribute("inert")).toBe(true);
     expect(document.activeElement).toBe(menu);
   });
 
-  it("배경을 누르거나 새 문의를 누르면 닫힌다", () => {
+  it("좁은 화면: 배경을 누르거나 새 문의를 누르면 닫힌다", async () => {
+    const user = userEvent.setup();
     stubMatchMedia({ desktop: false, systemDark: false });
     renderApp();
     const sidebar = document.getElementById("sidebar")!;
-    fireEvent.click(screen.getByRole("button", { name: /메뉴 열기/ }));
-    fireEvent.click(document.querySelector(".bg-black\\/40")!);
+    await user.click(screen.getByRole("button", { name: /메뉴 열기/ }));
+    await user.click(document.querySelector(".bg-black\\/40")!);
     expect(sidebar.hasAttribute("inert")).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: /메뉴 열기/ }));
-    fireEvent.click(screen.getByRole("button", { name: "+ 새 문의" }));
+    await user.click(screen.getByRole("button", { name: /메뉴 열기/ }));
+    await user.click(screen.getByRole("button", { name: "+ 새 문의" }));
     expect(sidebar.hasAttribute("inert")).toBe(true);
   });
 });

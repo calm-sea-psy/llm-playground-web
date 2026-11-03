@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoScroll } from "./useAutoScroll";
 
 // jsdom에는 레이아웃과 ResizeObserver가 없다 → 높이 · 스크롤 위치를 직접 정하고, 높이 변화는 손으로 알린다
+// scroll · wheel 은 user-event 에 없어 fireEvent 를 쓴다. PageUp 도 스크롤 입력의 한 갈래라 같이 둔다
 let resizeCallbacks: Array<() => void> = [];
 
 beforeEach(() => {

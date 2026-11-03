@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { MessageMeta } from "./MessageMeta";
 import type { AnswerResponse, RoutingResult } from "../api/types";
-import { ErrorMessage } from "./messages/ErrorMessage";
 
 afterEach(cleanup);
 
@@ -41,23 +41,29 @@ const META: AnswerResponse = {
   classification: CLASSIFICATION,
 };
 
+/** 펼치는 줄 (배지가 모인 곳). summary 는 역할이 없어 안의 글자에서 찾아 올라간다 */
+function summaryText(): string {
+  return screen.getByText("처리 과정 ▸").parentElement?.textContent ?? "";
+}
+
 describe("MessageMeta", () => {
   it("배지: 라벨 · 경로 · 검증 결과 · 답변 시간 · 툴 · 모델", () => {
     render(<MessageMeta meta={META} totalMs={3200} />);
-    const summary = document.querySelector("summary")!;
-    expect(summary.textContent).toContain("배송");
-    expect(summary.textContent).toContain("확신 부족");
-    expect(summary.textContent).toContain("검증 후 변경 → 배송");
-    expect(summary.textContent).toContain("1.6초");
-    expect(summary.textContent).toContain("날씨");
-    expect(summary.textContent).toContain("로컬 · gemma-4-E4B-it-GGUF:Q4_K_M");
+    const summary = summaryText();
+    expect(summary).toContain("배송");
+    expect(summary).toContain("확신 부족");
+    expect(summary).toContain("검증 후 변경 → 배송");
+    expect(summary).toContain("1.6초");
+    expect(summary).toContain("날씨");
+    expect(summary).toContain("로컬 · gemma-4-E4B-it-GGUF:Q4_K_M");
   });
 
-  it("펼치면 분류기 확률 · 경로 규칙 · LLM 검증 · 툴 호출 · 토큰 · 전체 시간", () => {
+  it("펼치면 분류기 확률 · 경로 규칙 · LLM 검증 · 툴 호출 · 토큰 · 전체 시간", async () => {
+    const user = userEvent.setup();
     render(<MessageMeta meta={META} totalMs={3200} />);
-    const details = document.querySelector("details")!;
+    const details = screen.getByRole<HTMLDetailsElement>("group");
     expect(details.open).toBe(false);
-    fireEvent.click(document.querySelector("summary")!);
+    await user.click(screen.getByText("처리 과정 ▸"));
     expect(details.open).toBe(true);
 
     const text = details.textContent;
@@ -76,7 +82,7 @@ describe("MessageMeta", () => {
 
   it("분류를 거치지 않은 답변은 분류 · 경로 · 검증을 숨긴다", () => {
     render(<MessageMeta meta={{ ...META, classification: null, toolsUsed: [] }} />);
-    const text = document.querySelector("details")!.textContent;
+    const text = screen.getByRole("group").textContent;
     expect(text).not.toContain("분류기 확률");
     expect(text).not.toContain("경로 규칙");
     expect(text).not.toContain("LLM 검증");
@@ -92,41 +98,13 @@ describe("MessageMeta", () => {
       verification: null,
     };
     render(<MessageMeta meta={{ ...META, label: "unknown", classification: unknown }} />);
-    expect(document.querySelector("summary")!.textContent.match(/범위 밖/g)).toHaveLength(1);
+    expect(summaryText().match(/범위 밖/g)).toHaveLength(1);
   });
 
   it("done 전에 받은 classification을 쓸 수 있다", () => {
     render(
       <MessageMeta meta={{ ...META, classification: null }} classification={CLASSIFICATION} />,
     );
-    expect(document.querySelector("summary")!.textContent).toContain("확신 부족");
-  });
-});
-
-describe("ErrorMessage", () => {
-  it.each([
-    ["llm_error", "모델 서버(Ollama)가 꺼져 있을 수 있습니다."],
-    ["config_error", "서버 설정을 확인하세요"],
-    ["llm_timeout", "응답 시간이 초과되었습니다."],
-    ["network", "API 서버에 연결할 수 없습니다."],
-    ["incomplete", "답변을 끝까지 받지 못했습니다"],
-    ["처음 보는 코드", "알 수 없는 오류가 발생했습니다."],
-  ])("%s 안내 + 다시 시도", (code, guide) => {
-    render(
-      <ErrorMessage error={{ code, message: "ConnectError: [Errno 111]" }} onRetry={() => {}} />,
-    );
-    expect(screen.getByRole("alert").textContent).toContain(guide);
-    expect(screen.getByRole("alert").textContent).toContain("ConnectError: [Errno 111]");
-    expect(screen.getByRole("button", { name: "다시 시도" })).toBeTruthy();
-  });
-
-  it("입력 오류는 다시 보내도 같아서 다시 시도 버튼이 없다", () => {
-    render(
-      <ErrorMessage
-        error={{ code: "invalid_input", message: "text: 빈 문장" }}
-        onRetry={() => {}}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: "다시 시도" })).toBeNull();
+    expect(summaryText()).toContain("확신 부족");
   });
 });

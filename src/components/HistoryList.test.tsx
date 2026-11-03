@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HistoryList } from "./HistoryList";
@@ -58,19 +59,21 @@ describe("HistoryList", () => {
     expect(screen.getByText("아직 문의가 없습니다.")).toBeTruthy();
   });
 
-  it("보고 있는 대화를 표시하고, 누르면 연다", () => {
+  it("보고 있는 대화를 표시하고, 누르면 연다", async () => {
+    const user = userEvent.setup();
     const { onSelect } = setup({ currentId: "yesterday" });
     const current = screen.getByRole("button", { name: /^어제 문의/ });
     expect(current.getAttribute("aria-current")).toBe("page");
-    fireEvent.click(screen.getByRole("button", { name: /^지난주 문의/ }));
+    await user.click(screen.getByRole("button", { name: /^지난주 문의/ }));
     expect(onSelect).toHaveBeenCalledWith("week");
   });
 
-  it("삭제 버튼으로 지운다. 받는 중인 대화는 삭제 버튼이 없고 표시가 붙는다", () => {
+  it("삭제 버튼으로 지운다. 받는 중인 대화는 삭제 버튼이 없고 표시가 붙는다", async () => {
+    const user = userEvent.setup();
     const { onRemove } = setup({ activeId: "today" });
     expect(screen.queryByRole("button", { name: "문의 삭제: 오늘 문의" })).toBeNull();
     expect(screen.getByLabelText("답변 받는 중")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "문의 삭제: 어제 문의" }));
+    await user.click(screen.getByRole("button", { name: "문의 삭제: 어제 문의" }));
     expect(onRemove).toHaveBeenCalledWith("yesterday");
   });
 });
