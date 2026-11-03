@@ -65,7 +65,7 @@ describe("AssistantMessage", () => {
         isBusy={false}
       />,
     );
-    expect(document.querySelector("strong")?.textContent).toBe("3일");
+    expect(screen.getByText("3일").tagName).toBe("STRONG");
     expect(screen.getByRole("button", { name: "답변 복사" })).toBeTruthy();
     // 처리 과정 배지 (라벨 · 답변 시간 · 모델)
     expect(screen.getByText("배송")).toBeTruthy();
@@ -75,7 +75,7 @@ describe("AssistantMessage", () => {
   });
 
   it("받는 중에는 aria-busy, 다시 생성 버튼은 완료 뒤에만", () => {
-    const { container } = render(
+    render(
       <AssistantMessage
         message={message({ content: "받는 중", status: "streaming" })}
         onRetry={() => {}}
@@ -83,7 +83,7 @@ describe("AssistantMessage", () => {
         isBusy
       />,
     );
-    expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(screen.getByText("답변:").closest('[aria-busy="true"]')).not.toBeNull();
     expect(screen.queryByRole("button", { name: "같은 문의로 답변 다시 생성" })).toBeNull();
   });
 

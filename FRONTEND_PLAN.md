@@ -349,7 +349,7 @@ llm-playground-web/
 ### 4단계 (2026-10-13)
 
 - **속도 값**: 기본 초당 50자(`TYPEWRITER_BASE_CPS`), 밀린 글자를 0.6초 안에 따라잡는 속도(`TYPEWRITER_CATCHUP_SEC`). 화면 글은 도착보다 최대 약 0.6초 뒤처진다. 2단계 실측(로컬 Gemma 약 400자/초)에 맞췄다.
-- **수신과 표시를 나눈 위치**: `useChat`은 받은 글 전체를 `content`에 저장하고(저장 · 복사 기준), `AssistantMessage`가 `useTypewriter`로 흘린다. 커서와 메타 줄은 "표시 완료"(`caughtUp`) 기준.
+- **수신과 표시를 나눈 위치**: `useChat`은 받은 글 전체를 `content`에 저장하고(저장 · 복사 기준), `AssistantMessage`가 `useTypewriter`로 흘린다. 커서와 메타 줄은 "표시 완료"(`isCaughtUp`) 기준.
 - **애니메이션 루프는 delta마다 새로 시작하지 않는다** — 처음 구현에서 delta(약 10ms 간격)마다 effect가 루프를 다시 시작해 첫 프레임 경과 시간 0이 반복되어 글이 거의 흐르지 않는 결함을 찾았다. 루프가 돌고 있으면 그대로 두고, 루프는 다음 프레임에 늘어난 `total`을 읽는다. 회귀 테스트: "조각이 10ms마다 계속 붙어도 멈추지 않고 흘러간다".
 - **done의 `answer`는 앞뒤 공백을 지운 값**이라 delta를 이은 글보다 짧을 수 있다. 내용이 짧아지면 처음부터 다시 흘리지 않고 끝 위치만 맞춘다(비워졌을 때만 0 = 다시 시도).
 - **처음부터 완료 상태로 화면에 올라온 메시지는 흘리지 않는다** — `AssistantMessage`가 pending · streaming을 본 적이 있는지(`live` state)로 판단한다(6단계에서 내역을 불러올 때 대비).
