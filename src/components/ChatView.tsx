@@ -66,7 +66,8 @@ export function ChatView({
                   <UserMessage key={m.id} message={m} />
                 ) : (
                   <AssistantMessage
-                    key={m.id}
+                    // 다시 받기는 같은 id 에 createdAt 만 새로 찍는다 → 타이핑 · 알림 상태를 처음부터
+                    key={`${m.id}:${m.createdAt}`}
                     message={m}
                     onRetry={onRetry}
                     onRegenerate={onRegenerate}

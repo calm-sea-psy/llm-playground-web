@@ -227,7 +227,8 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         role: "assistant",
         content: "",
         status: "pending",
-        createdAt: Date.now(),
+        // 화면은 이 값이 바뀌는 것을 보고 메시지를 새로 만든다 (ChatView 의 key). 같은 ms 여도 반드시 바꾼다
+        createdAt: Math.max(Date.now(), m.createdAt + 1),
         provider: target.provider,
       }));
       void run(conversation.id, assistantId, target.question, target.provider);
