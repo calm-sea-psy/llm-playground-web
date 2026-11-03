@@ -28,7 +28,25 @@ interface AssistantMessageProps {
   onAnnounce?: (text: string) => void;
 }
 
-/** AI 답변: 왼쪽 전체 폭. 마크다운 본문 + 복사 · 다시 생성 + 처리 과정 배지 */
+interface AnswerActionsProps {
+  canCopy: boolean;
+  canRegenerate: boolean;
+  isBusy: boolean;
+  onCopy: () => Promise<boolean>;
+  onRegenerate: () => void;
+}
+
+interface AnnounceOnceOptions {
+  isLive: boolean;
+  isDone: boolean;
+  message: Message;
+  onAnnounce: AssistantMessageProps["onAnnounce"];
+}
+
+/**
+ * AI 답변: 왼쪽 전체 폭. 마크다운 본문 + 복사 · 다시 생성 + 처리 과정 배지.
+ * 다시 받기는 createdAt 이 새로 찍혀 쓰는 쪽(ChatView)의 key 로 새로 만들어진다.
+ */
 export const AssistantMessage = memo(AssistantMessageView);
 
 function AssistantMessageView({
@@ -40,42 +58,21 @@ function AssistantMessageView({
 }: AssistantMessageProps) {
   const isReducedMotion = useReducedMotion();
   // 화면에 있는 동안 답변을 받은 메시지만 흘려 보여 준다 (처음부터 완료 상태로 올라온 내역은 바로).
-  // 한 번 받기 시작하면 끝난 뒤에도 유지해야 해서 파생값이 아니라 state 로 둔다
-  const [isLive, setIsLive] = useState(() => isReceiving(message));
-  if (!isLive && isReceiving(message)) {
-    setIsLive(true);
-  }
+  // 끝난 뒤에도 유지해야 해서 파생값으로 둘 수 없다. 만들어질 때 정해지고 바뀌지 않는다
+  // eslint-disable-next-line react/hook-use-state -- setter 가 필요 없다
+  const [isLive] = useState(() => isReceiving(message));
   const isInstant =
     !isLive || isReducedMotion || message.status === "stopped" || message.status === "error";
-  const { text, caughtUp } = useTypewriter(message.content, isInstant, message.id);
+  const { text, isCaughtUp } = useTypewriter(message.content, isInstant, message.id);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // 받는 중이거나, 다 받았어도 아직 흘리는 중이면 커서
-  const isTyping = message.status === "streaming" || (message.status === "done" && !caughtUp);
+  const isTyping = message.status === "streaming" || (message.status === "done" && !isCaughtUp);
   // 타이핑 중에는 닫히지 않은 서식(**, `, ```)을 임시로 닫아 그린다
   const shown = useMemo(() => (isTyping ? closeOpenMarkdown(text) : text), [isTyping, text]);
-  const isDone = message.status === "done" && caughtUp;
+  const isDone = message.status === "done" && isCaughtUp;
 
-  // 화면에서 받은 답변이 끝나면 한 번만 알린다 (오류는 ErrorMessage 의 role="alert" 가 알린다)
-  const announcedRef = useRef(false);
-  useEffect(() => {
-    if (!isLive || announcedRef.current || !onAnnounce) {
-      return;
-    }
-    if (isDone) {
-      announcedRef.current = true;
-      const preview = Array.from(message.content).slice(0, ANNOUNCE_PREVIEW_LENGTH).join("");
-      onAnnounce(`답변 완료: ${preview}`);
-    } else if (message.status === "stopped") {
-      announcedRef.current = true;
-      onAnnounce("답변을 중지했습니다");
-    }
-  }, [isLive, isDone, message.status, message.content, onAnnounce]);
-  useEffect(() => {
-    if (isReceiving(message)) {
-      announcedRef.current = false; // 다시 시도하면 다시 알린다
-    }
-  }, [message]);
+  useAnnounceOnce({ isLive, isDone, message, onAnnounce });
 
   if (message.status === "pending") {
     return <StatusMessage stage={message.stage} since={message.createdAt} />;
@@ -118,22 +115,13 @@ function AssistantMessageView({
           isRetryDisabled={isBusy}
         />
       ) : null}
-      {canCopy || isDone ? (
-        <div className="-ml-2 flex flex-wrap items-center gap-1">
-          {canCopy ? <CopyButton ariaLabel="답변 복사" onCopy={handleCopy} /> : null}
-          {isDone ? (
-            <button
-              type="button"
-              onClick={() => onRegenerate(message.id)}
-              disabled={isBusy}
-              aria-label="같은 문의로 답변 다시 생성"
-              className={SMALL_BUTTON_CLASS}
-            >
-              다시 생성
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <AnswerActions
+        canCopy={canCopy}
+        canRegenerate={isDone}
+        isBusy={isBusy}
+        onCopy={handleCopy}
+        onRegenerate={() => onRegenerate(message.id)}
+      />
       {isDone && message.meta ? (
         <MessageMeta
           meta={message.meta}
@@ -143,4 +131,50 @@ function AssistantMessageView({
       ) : null}
     </div>
   );
+}
+
+function AnswerActions({
+  canCopy,
+  canRegenerate,
+  isBusy,
+  onCopy,
+  onRegenerate,
+}: AnswerActionsProps) {
+  if (!canCopy && !canRegenerate) {
+    return null;
+  }
+  return (
+    <div className="-ml-2 flex flex-wrap items-center gap-1">
+      {canCopy ? <CopyButton ariaLabel="답변 복사" onCopy={onCopy} /> : null}
+      {canRegenerate ? (
+        <button
+          type="button"
+          onClick={onRegenerate}
+          disabled={isBusy}
+          aria-label="같은 문의로 답변 다시 생성"
+          className={SMALL_BUTTON_CLASS}
+        >
+          다시 생성
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** 화면에서 받은 답변이 끝나면 한 번만 알린다 (오류는 ErrorMessage 의 role="alert" 가 알린다) */
+function useAnnounceOnce({ isLive, isDone, message, onAnnounce }: AnnounceOnceOptions): void {
+  const hasAnnouncedRef = useRef(false);
+  useEffect(() => {
+    if (!isLive || hasAnnouncedRef.current || !onAnnounce) {
+      return;
+    }
+    if (isDone) {
+      hasAnnouncedRef.current = true;
+      const preview = Array.from(message.content).slice(0, ANNOUNCE_PREVIEW_LENGTH).join("");
+      onAnnounce(`답변 완료: ${preview}`);
+    } else if (message.status === "stopped") {
+      hasAnnouncedRef.current = true;
+      onAnnounce("답변을 중지했습니다");
+    }
+  }, [isLive, isDone, message.status, message.content, onAnnounce]);
 }

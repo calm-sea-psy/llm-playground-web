@@ -4,6 +4,7 @@
 // - 줄 끝은 \n · \r\n · \r 모두 받는다
 // - data 줄이 여러 개면 \n으로 잇는다. data가 없는 이벤트와 주석(":" 줄)은 버린다
 
+/** 완성된 SSE 이벤트 하나 */
 export interface SseMessage {
   /** event 필드. 없으면 "message" */
   event: string;
@@ -11,6 +12,7 @@ export interface SseMessage {
   data: string;
 }
 
+/** 스트림 하나를 읽는 동안 쓰는 파서. 조각 사이의 미완성 이벤트를 안에 쌓아 둔다 */
 export class SseParser {
   private readonly decoder = new TextDecoder();
   private buffer = "";
@@ -38,23 +40,32 @@ export class SseParser {
     const messages: SseMessage[] = [];
     for (const block of blocks) {
       const message = parseBlock(block);
-      if (message) messages.push(message);
+      if (message) {
+        messages.push(message);
+      }
     }
     return messages;
   }
 }
 
-function parseBlock(block: string): SseMessage | null {
+function parseBlock(block: string): SseMessage | undefined {
   let event = "message";
   const data: string[] = [];
   for (const line of block.split("\n")) {
-    if (line === "" || line.startsWith(":")) continue;
+    if (line === "" || line.startsWith(":")) {
+      continue;
+    }
     const colon = line.indexOf(":");
     const field = colon === -1 ? line : line.slice(0, colon);
     let value = colon === -1 ? "" : line.slice(colon + 1);
-    if (value.startsWith(" ")) value = value.slice(1);
-    if (field === "event") event = value;
-    else if (field === "data") data.push(value);
+    if (value.startsWith(" ")) {
+      value = value.slice(1);
+    }
+    if (field === "event") {
+      event = value;
+    } else if (field === "data") {
+      data.push(value);
+    }
   }
-  return data.length ? { event, data: data.join("\n") } : null;
+  return data.length ? { event, data: data.join("\n") } : undefined;
 }

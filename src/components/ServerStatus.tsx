@@ -15,10 +15,15 @@ const STATUS_TEXT: Record<HealthState["kind"], string> = {
   offline: "연결 안 됨",
 };
 
+interface ServerStatusProps {
+  state: HealthState;
+}
+
 /** 사이드바 아래 서버 상태 (/health) */
-export function ServerStatus({ state }: { state: HealthState }) {
+export function ServerStatus({ state }: ServerStatusProps) {
+  const detail = detailOf(state);
   return (
-    <div className="text-xs text-zinc-600 dark:text-zinc-400" role="status" title={titleOf(state)}>
+    <div className="text-xs text-zinc-600 dark:text-zinc-400" role="status">
       <div className="flex items-center gap-2 font-medium text-zinc-800 dark:text-zinc-200">
         <span
           className={`size-2 shrink-0 rounded-full ${DOT_CLASS[state.kind]}`}
@@ -41,12 +46,13 @@ export function ServerStatus({ state }: { state: HealthState }) {
           </div>
         </dl>
       ) : null}
+      {detail ? <p className="mt-1 pl-4 break-words">{detail}</p> : null}
     </div>
   );
 }
 
-/** 마우스를 올렸을 때 보일 자세한 이유 */
-function titleOf(state: HealthState): string | undefined {
+/** 자세한 이유. 키보드 · 스크린 리더로도 볼 수 있게 글로 보여 준다 */
+function detailOf(state: HealthState): string | undefined {
   switch (state.kind) {
     case "classifier_error":
       return state.health.classifierError ?? undefined;

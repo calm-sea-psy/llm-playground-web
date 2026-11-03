@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AssistantMessage } from "./AssistantMessage";
@@ -26,10 +27,13 @@ function message(overrides: Partial<Message>): Message {
   return { id: "m1", role: "assistant", content: "", status: "done", createdAt: 0, ...overrides };
 }
 
+let user: UserEvent;
 let write: ReturnType<typeof vi.fn>;
 let writeText: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  // user-event 가 navigator.clipboard 를 자기 가짜로 바꾸므로 그 뒤에 끼운다. delay 없음: 가짜 타이머에서도 멈추지 않게
+  user = userEvent.setup({ delay: null });
   write = vi.fn(() => Promise.resolve());
   writeText = vi.fn(() => Promise.resolve());
   vi.stubGlobal("navigator", { ...navigator, clipboard: { write, writeText } });
@@ -61,7 +65,7 @@ describe("AssistantMessage", () => {
         isBusy={false}
       />,
     );
-    expect(document.querySelector("strong")?.textContent).toBe("3일");
+    expect(screen.getByText("3일").tagName).toBe("STRONG");
     expect(screen.getByRole("button", { name: "답변 복사" })).toBeTruthy();
     // 처리 과정 배지 (라벨 · 답변 시간 · 모델)
     expect(screen.getByText("배송")).toBeTruthy();
@@ -71,7 +75,7 @@ describe("AssistantMessage", () => {
   });
 
   it("받는 중에는 aria-busy, 다시 생성 버튼은 완료 뒤에만", () => {
-    const { container } = render(
+    render(
       <AssistantMessage
         message={message({ content: "받는 중", status: "streaming" })}
         onRetry={() => {}}
@@ -79,11 +83,11 @@ describe("AssistantMessage", () => {
         isBusy
       />,
     );
-    expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(screen.getByText("답변:").closest('[aria-busy="true"]')).not.toBeNull();
     expect(screen.queryByRole("button", { name: "같은 문의로 답변 다시 생성" })).toBeNull();
   });
 
-  it("다시 생성을 누르면 메시지 id로 알린다. 다른 답변을 받는 중이면 막힌다", () => {
+  it("다시 생성을 누르면 메시지 id로 알린다. 다른 답변을 받는 중이면 막힌다", async () => {
     const onRegenerate = vi.fn();
     const { rerender } = render(
       <AssistantMessage
@@ -93,7 +97,7 @@ describe("AssistantMessage", () => {
         isBusy={false}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "같은 문의로 답변 다시 생성" }));
+    await user.click(screen.getByRole("button", { name: "같은 문의로 답변 다시 생성" }));
     expect(onRegenerate).toHaveBeenCalledWith("m1");
     rerender(
       <AssistantMessage
@@ -179,7 +183,8 @@ describe("AssistantMessage", () => {
   });
 
   it('복사는 서식 있는 글(HTML)과 평문을 함께 넣고, 2초 동안 "복사됨"', async () => {
-    vi.useFakeTimers();
+    // Testing Library 의 비동기 래퍼가 setTimeout(0) 을 기다리므로 실제 시간도 흐르게 둔다
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     render(
       <AssistantMessage
         message={message({ content: ANSWER, meta: META })}
@@ -189,16 +194,14 @@ describe("AssistantMessage", () => {
       />,
     );
     const button = screen.getByRole("button", { name: "답변 복사" });
-    await act(async () => {
-      fireEvent.click(button);
-    });
+    await act(() => user.click(button));
 
     expect(write).toHaveBeenCalledOnce();
-    const item = write.mock.calls[0][0][0] as { items: Record<string, Blob> };
-    expect(await item.items["text/plain"].text()).toBe(
+    const item = write.mock.calls[0]![0][0] as { items: Record<string, Blob> };
+    expect(await item.items["text/plain"]!.text()).toBe(
       "배송은 3일 걸립니다.\n\n- 주문 내역 확인\n- 문의 접수",
     );
-    const copiedHtml = await item.items["text/html"].text();
+    const copiedHtml = await item.items["text/html"]!.text();
     expect(copiedHtml).toContain("<strong>3일</strong>");
     expect(copiedHtml).not.toContain("class=");
     expect(button.textContent).toBe("복사됨 ✓");
@@ -219,9 +222,7 @@ describe("AssistantMessage", () => {
         isBusy={false}
       />,
     );
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "답변 복사" }));
-    });
+    await act(() => user.click(screen.getByRole("button", { name: "답변 복사" })));
     expect(writeText).toHaveBeenCalledWith("배송은 3일 걸립니다.\n\n- 주문 내역 확인\n- 문의 접수");
   });
 
@@ -238,9 +239,7 @@ describe("AssistantMessage", () => {
       />,
     );
     const button = screen.getByRole("button", { name: "답변 복사" });
-    await act(async () => {
-      fireEvent.click(button);
-    });
+    await act(() => user.click(button));
     expect(execCommand).toHaveBeenCalledWith("copy");
     expect(button.textContent).toBe("복사됨 ✓");
   });

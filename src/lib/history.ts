@@ -1,4 +1,4 @@
-// 문의 내역 저장 (localStorage). 저장 API 가 없어 브라우저에만 남는다.
+// 문의 내역 저장 (브라우저 저장소). 저장 API 가 없어 브라우저에만 남는다.
 // 모든 읽기 · 쓰기는 try/catch — 저장이 안 되는 환경(시크릿 창 · 차단 · 용량 초과)에서도 화면은 동작한다.
 //
 // 저장 형식
@@ -7,12 +7,25 @@
 
 import { z } from "zod";
 
-import { MESSAGE_STATUSES, type Conversation, type Message } from "./chat";
+import { MESSAGE_ROLES, MESSAGE_STATUSES, type Conversation, type Message } from "./chat";
+import { logWarning } from "./logger";
+import type { KeyValueStorage } from "./storage";
 import { answerResponseSchema, routingResultSchema } from "../api/schemas";
-import { PROVIDERS, STATUS_STAGES, type AnswerResponse, type RoutingResult } from "../api/types";
+import {
+  ANSWER_STATUSES,
+  LABELS,
+  PROVIDERS,
+  ROUTES,
+  STATUS_STAGES,
+  type AnswerResponse,
+  type RoutingResult,
+} from "../api/types";
 
+/** 문의 내역 저장 키 (v2) */
 export const HISTORY_KEY = "seal-frontend:conversations:v2";
+/** 예전 저장본 키. 불러올 때만 읽고 다음 저장 때 지운다 */
 export const LEGACY_HISTORY_KEY = "seal-frontend:conversations:v1";
+/** 마지막으로 보던 대화 저장 키 */
 export const CURRENT_KEY = "seal-frontend:current:v1";
 
 /** 보관 한도 (최신순). 대화 하나는 메타까지 수 KB → localStorage 한도(약 5MB) 안에 넉넉하다 */
@@ -24,8 +37,8 @@ const SHRINK_RATIO = 0.8;
 /** 불러온 내역 */
 export interface LoadedHistory {
   conversations: Conversation[];
-  /** 마지막으로 보던 대화. 없거나 지워졌으면 null */
-  currentId: string | null;
+  /** 마지막으로 보던 대화. 없거나 지워졌으면 undefined */
+  currentId: string | undefined;
 }
 
 /** 저장본 버전마다 메타를 읽는 방법 */
@@ -34,16 +47,57 @@ interface MetaReaders {
   classification: z.ZodType<RoutingResult | undefined>;
 }
 
-// v2 메타는 이 앱이 쓴 값이라 모양만 확인한다. 맞지 않으면 그 메타만 버린다
+const answerErrorSchema = z.object({ code: z.string(), message: z.string() });
+
+/** 화면 형식(camelCase) 그대로 저장한 RoutingResult */
+const storedRoutingResultSchema: z.ZodType<RoutingResult> = z.object({
+  label: z.enum(LABELS),
+  text: z.string(),
+  classifierLabel: z.string(),
+  scores: z.record(z.string(), z.number()),
+  route: z
+    .object({ route: z.enum(ROUTES), p1: z.number(), margin: z.number(), reason: z.string() })
+    .nullable(),
+  verification: z
+    .object({
+      match: z.boolean(),
+      reason: z.string(),
+      finalLabel: z.string(),
+      latencyMs: z.number(),
+      error: z.string().nullable(),
+    })
+    .nullable(),
+});
+
+/** 화면 형식(camelCase) 그대로 저장한 AnswerResponse */
+const storedAnswerResponseSchema: z.ZodType<AnswerResponse> = z.object({
+  requestId: z.string(),
+  status: z.enum(ANSWER_STATUSES),
+  label: z.string(),
+  answer: z.string().nullable(),
+  provider: z.enum(PROVIDERS),
+  model: z.string(),
+  promptVersion: z.string(),
+  toolsUsed: z.array(
+    z.object({
+      name: z.string(),
+      args: z.record(z.string(), z.unknown()),
+      ok: z.boolean(),
+      error: z.string().nullable(),
+      latencyMs: z.number(),
+    }),
+  ),
+  latencyMs: z.number(),
+  usage: z.object({ inputTokens: z.number().nullable(), outputTokens: z.number().nullable() }),
+  error: answerErrorSchema.nullable(),
+  createdAt: z.string(),
+  classification: storedRoutingResultSchema.nullable(),
+});
+
+// v2 메타도 렌더링이 그대로 읽는 값이라 전체 모양을 검증한다 (틀리면 렌더 중 예외). 맞지 않으면 그 메타만 버린다
 const V2_READERS: MetaReaders = {
-  meta: z
-    .custom<AnswerResponse>((v) => isObject(v) && typeof v.requestId === "string")
-    .optional()
-    .catch(undefined),
-  classification: z
-    .custom<RoutingResult>((v) => isObject(v) && typeof v.label === "string")
-    .optional()
-    .catch(undefined),
+  meta: storedAnswerResponseSchema.optional().catch(undefined),
+  classification: storedRoutingResultSchema.optional().catch(undefined),
 };
 
 // v1 메타는 서버 형식 → 서버 응답과 같은 스키마로 바꾼다
@@ -56,16 +110,17 @@ const V1_READERS: MetaReaders = {
  * 저장된 내역을 불러온다. 깨진 대화는 버리고 나머지는 살린다.
  * 저장 도중 탭이 닫혀 pending · streaming 으로 남은 답변은 stopped 로 바꾼다.
  */
-export function loadHistory(): LoadedHistory {
+export function loadHistory(storage: KeyValueStorage): LoadedHistory {
   let raw: string | null;
   let legacyRaw: string | null;
   let current: string | null;
   try {
-    raw = localStorage.getItem(HISTORY_KEY);
-    legacyRaw = raw === null ? localStorage.getItem(LEGACY_HISTORY_KEY) : null;
-    current = localStorage.getItem(CURRENT_KEY);
-  } catch {
-    return { conversations: [], currentId: null };
+    raw = storage.getItem(HISTORY_KEY);
+    legacyRaw = raw === null ? storage.getItem(LEGACY_HISTORY_KEY) : null;
+    current = storage.getItem(CURRENT_KEY);
+  } catch (e) {
+    logWarning("문의 내역을 읽지 못했다", e);
+    return { conversations: [], currentId: undefined };
   }
 
   const list = raw === null ? readList(legacyRaw, 1) : readList(raw, 2);
@@ -76,7 +131,7 @@ export function loadHistory(): LoadedHistory {
       return parsed.success ? [parsed.data] : [];
     }),
   );
-  const currentId = conversations.some((c) => c.id === current) ? current : null;
+  const currentId = conversations.find((c) => c.id === current)?.id;
   return { conversations, currentId };
 }
 
@@ -85,15 +140,16 @@ export function loadHistory(): LoadedHistory {
  *
  * @returns 저장했으면 true (일부를 줄였어도 true), 저장할 수 없으면 false
  */
-export function saveHistory(conversations: Conversation[]): boolean {
+export function saveHistory(storage: KeyValueStorage, conversations: Conversation[]): boolean {
   let keep = sortByRecent(conversations).slice(0, MAX_CONVERSATIONS);
   for (;;) {
     try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: keep }));
-      localStorage.removeItem(LEGACY_HISTORY_KEY);
+      storage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: keep }));
+      storage.removeItem(LEGACY_HISTORY_KEY);
       return true;
     } catch (e) {
       if (!isQuotaError(e) || keep.length <= 1) {
+        logWarning("문의 내역을 저장하지 못했다", e);
         return false;
       }
       keep = keep.slice(0, Math.floor(keep.length * SHRINK_RATIO));
@@ -101,16 +157,16 @@ export function saveHistory(conversations: Conversation[]): boolean {
   }
 }
 
-/** 마지막으로 보던 대화를 남긴다 (새로고침하면 다시 연다). null 이면 새 문의 화면 */
-export function saveCurrentId(id: string | null): void {
+/** 마지막으로 보던 대화를 남긴다 (새로고침하면 다시 연다). 없으면 새 문의 화면 */
+export function saveCurrentId(storage: KeyValueStorage, id: string | undefined): void {
   try {
     if (id) {
-      localStorage.setItem(CURRENT_KEY, id);
+      storage.setItem(CURRENT_KEY, id);
     } else {
-      localStorage.removeItem(CURRENT_KEY);
+      storage.removeItem(CURRENT_KEY);
     }
-  } catch {
-    // 저장이 안 되어도 화면은 동작한다
+  } catch (e) {
+    logWarning("마지막으로 보던 대화를 저장하지 못했다", e); // 화면은 그대로 동작한다
   }
 }
 
@@ -126,7 +182,8 @@ function readList(raw: string | null, version: number): unknown[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (e) {
+    logWarning("문의 내역 저장본이 깨져 있어 버린다", e);
     return [];
   }
   return isObject(parsed) && parsed.version === version && Array.isArray(parsed.conversations)
@@ -138,7 +195,7 @@ function conversationSchema(readers: MetaReaders): z.ZodType<Conversation> {
   const messageSchema = z
     .object({
       id: z.string(),
-      role: z.enum(["user", "assistant"]),
+      role: z.enum(MESSAGE_ROLES),
       content: z.string(),
       status: z.enum(MESSAGE_STATUSES),
       createdAt: z.number(),
@@ -146,7 +203,7 @@ function conversationSchema(readers: MetaReaders): z.ZodType<Conversation> {
       classification: readers.classification,
       provider: z.enum(PROVIDERS).optional().catch(undefined),
       meta: readers.meta,
-      error: z.object({ code: z.string(), message: z.string() }).optional().catch(undefined),
+      error: answerErrorSchema.optional().catch(undefined),
       finishedAt: z.number().optional().catch(undefined),
       regenerated: z.boolean().optional().catch(undefined),
     })

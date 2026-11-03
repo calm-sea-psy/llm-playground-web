@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { delay, http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { z } from "zod";
 
 import { AnswerStreamError, type AnswerStreamHandlers } from "./client";
@@ -9,8 +11,14 @@ import { answerResponseSchema, type routingResultSchema } from "./schemas";
 type WireAnswer = z.input<typeof answerResponseSchema>;
 type WireRouting = z.input<typeof routingResultSchema>;
 
-const client = createHttpApiClient({ baseUrl: "", healthTimeoutMs: 5000 });
+const BASE_URL = "http://api.test";
+const ANSWER_URL = `${BASE_URL}/api/answer/stream`;
+const HEALTH_URL = `${BASE_URL}/health`;
+
+const client = createHttpApiClient({ baseUrl: BASE_URL, healthTimeoutMs: 5000 });
 const answerStream = client.answerStream;
+
+const server = setupServer();
 
 const encoder = new TextEncoder();
 
@@ -55,8 +63,12 @@ function streamResponse(
   const body = new ReadableStream<Uint8Array>({
     pull(controller) {
       const next = queue.shift();
-      if (next !== undefined) return void controller.enqueue(encoder.encode(next));
-      if (!hang) return void controller.close();
+      if (next !== undefined) {
+        return void controller.enqueue(encoder.encode(next));
+      }
+      if (!hang) {
+        return void controller.close();
+      }
       return new Promise<void>((resolve) => {
         signal?.addEventListener("abort", () => {
           controller.error(new DOMException("This operation was aborted", "AbortError"));
@@ -68,10 +80,20 @@ function streamResponse(
   return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
 }
 
-function mockFetch(impl: (init: RequestInit) => Response | Promise<Response>) {
-  const fetch = vi.fn((_url: string, init: RequestInit) => Promise.resolve(impl(init)));
-  vi.stubGlobal("fetch", fetch);
-  return fetch;
+/** 답변 요청에 impl 의 응답을 돌려준다. 받은 요청 본문은 돌려주는 배열에 쌓인다 */
+function onAnswer(impl: (request: Request) => Response | Promise<Response>): unknown[] {
+  const bodies: unknown[] = [];
+  server.use(
+    http.post(ANSWER_URL, async ({ request }) => {
+      bodies.push(await request.clone().json());
+      return impl(request);
+    }),
+  );
+  return bodies;
+}
+
+function onHealth(response: () => Response): void {
+  server.use(http.get(HEALTH_URL, response));
 }
 
 function recorder() {
@@ -84,14 +106,14 @@ function recorder() {
   return { events, handlers };
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 describe("answerStream", () => {
   it("정상 흐름: status → classification → status → delta 여러 개 → done", async () => {
     const done = answer({ classification: CLASSIFICATION });
-    const fetch = mockFetch(() =>
+    const bodies = onAnswer(() =>
       streamResponse([
         sse("status", { stage: "classifying", message: "문의를 분류하는 중..." }),
         sse("classification", CLASSIFICATION),
@@ -114,15 +136,12 @@ describe("answerStream", () => {
       ["delta", " 확인 후"],
     ]);
 
-    const [url, init] = fetch.mock.calls[0];
-    expect(url).toBe("/api/answer/stream");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual({ text: "배송이 늦어요", provider: "local" });
+    expect(bodies).toEqual([{ text: "배송이 늦어요", provider: "local" }]);
   });
 
   it("adventure 흐름: delta 없이 done에 전체 답변", async () => {
     const done = answer({ label: "unknown", answer: "오늘은 화요일입니다." });
-    mockFetch(() =>
+    onAnswer(() =>
       streamResponse([
         sse("status", {
           stage: "adventure",
@@ -143,15 +162,18 @@ describe("answerStream", () => {
     const whole = sse("delta", { text: "한글 조각" }) + sse("done", answer());
     const bytes = encoder.encode(whole);
     // 한글 바이트 중간을 지나도록 3바이트씩 흘린다
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (let i = 0; i < bytes.length; i += 3) controller.enqueue(bytes.slice(i, i + 3));
-        controller.close();
-      },
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() => Promise.resolve(new Response(body))),
+    onAnswer(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (let i = 0; i < bytes.length; i += 3) {
+                controller.enqueue(bytes.slice(i, i + 3));
+              }
+              controller.close();
+            },
+          }),
+        ),
     );
     const deltas: string[] = [];
 
@@ -167,7 +189,7 @@ describe("answerStream", () => {
       answer: null,
       error: { code: "llm_error", message: "Ollama에 연결할 수 없습니다" },
     });
-    mockFetch(() =>
+    onAnswer(() =>
       streamResponse([sse("status", { stage: "answering", message: "" }), sse("done", done)]),
     );
 
@@ -180,22 +202,19 @@ describe("answerStream", () => {
       answer: null,
       error: { code: "invalid_input", message: "text: 빈 문장" },
     });
-    mockFetch(() => Response.json(body, { status: 400 }));
+    onAnswer(() => HttpResponse.json(body, { status: 400 }));
 
     await expect(answerStream({ text: "" })).resolves.toEqual(answerResponseSchema.parse(body));
   });
 
   it("HTTP 502(백엔드 꺼짐, 빈 본문)는 network 오류", async () => {
-    mockFetch(() => new Response("", { status: 502 }));
+    onAnswer(() => new Response("", { status: 502 }));
 
     await expect(answerStream({ text: "x" })).rejects.toMatchObject({ code: "network" });
   });
 
   it("fetch 자체가 실패하면 network 오류", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))),
-    );
+    onAnswer(() => HttpResponse.error());
 
     await expect(answerStream({ text: "x" })).rejects.toMatchObject({
       name: "AnswerStreamError",
@@ -205,7 +224,7 @@ describe("answerStream", () => {
   });
 
   it("done 없이 스트림이 끝나면 incomplete 오류", async () => {
-    mockFetch(() => streamResponse([sse("delta", { text: "중간까지" })]));
+    onAnswer(() => streamResponse([sse("delta", { text: "중간까지" })]));
     const deltas: string[] = [];
 
     await expect(
@@ -217,23 +236,23 @@ describe("answerStream", () => {
   });
 
   it("data가 JSON이 아니면 bad_response 오류", async () => {
-    mockFetch(() => streamResponse(["event: delta\ndata: {깨짐\n\n"]));
+    onAnswer(() => streamResponse(["event: delta\ndata: {깨짐\n\n"]));
 
     await expect(answerStream({ text: "x" })).rejects.toMatchObject({ code: "bad_response" });
   });
 
   it("모르는 이벤트는 무시한다", async () => {
-    mockFetch(() => streamResponse([sse("ping", {}), sse("done", answer())]));
+    onAnswer(() => streamResponse([sse("ping", {}), sse("done", answer())]));
 
     await expect(answerStream({ text: "x" })).resolves.toMatchObject({ status: "ok" });
   });
 
   it("스트리밍 중 중지하면 aborted 오류이고, 받은 delta는 이미 전달되어 있다", async () => {
     const controller = new AbortController();
-    mockFetch((init) =>
+    onAnswer(() =>
       streamResponse([sse("delta", { text: "받은 데까지" })], {
         hang: true,
-        signal: init.signal ?? undefined,
+        signal: controller.signal,
       }),
     );
     const deltas: string[] = [];
@@ -256,27 +275,21 @@ describe("answerStream", () => {
 
   it("응답 전에 중지하면 aborted 오류 (network와 구분)", async () => {
     const controller = new AbortController();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        (_url: string, init: RequestInit) =>
-          new Promise((_, reject) => {
-            init.signal?.addEventListener("abort", () =>
-              reject(new DOMException("aborted", "AbortError")),
-            );
-          }),
-      ),
-    );
-    const promise = answerStream({ text: "x" }, {}, controller.signal);
-    controller.abort();
+    onAnswer(async () => {
+      controller.abort();
+      await delay("infinite");
+      return new Response();
+    });
 
-    await expect(promise).rejects.toMatchObject({ code: "aborted" });
+    await expect(answerStream({ text: "x" }, {}, controller.signal)).rejects.toMatchObject({
+      code: "aborted",
+    });
   });
 });
 
 describe("응답 변환", () => {
   it("서버 형식(snake_case)을 화면 형식(camelCase)으로 바꾼다", async () => {
-    mockFetch(() =>
+    onAnswer(() =>
       streamResponse([
         sse(
           "done",
@@ -304,7 +317,7 @@ describe("응답 변환", () => {
 
   it("done 의 필드가 빠졌으면 bad_response 오류", async () => {
     const { model: _model, ...broken } = answer();
-    mockFetch(() => streamResponse([sse("done", broken)]));
+    onAnswer(() => streamResponse([sse("done", broken)]));
 
     await expect(answerStream({ text: "x" })).rejects.toMatchObject({ code: "bad_response" });
   });
@@ -312,8 +325,8 @@ describe("응답 변환", () => {
 
 describe("getHealth", () => {
   it("상태를 화면 형식으로 돌려준다", async () => {
-    mockFetch(() =>
-      Response.json({
+    onHealth(() =>
+      HttpResponse.json({
         status: "ok",
         classifier: "klue-roberta",
         classifier_device: "cuda",
@@ -335,7 +348,7 @@ describe("getHealth", () => {
   });
 
   it("형식이 맞지 않으면 예외", async () => {
-    mockFetch(() => Response.json({ status: "ok" }));
+    onHealth(() => HttpResponse.json({ status: "ok" }));
 
     await expect(client.getHealth()).rejects.toThrow("상태 응답 형식이 맞지 않습니다");
   });

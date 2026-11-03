@@ -15,12 +15,18 @@ const MAX_TITLE_LENGTH = 40;
  * - stopped: 사용자가 중지함. 받은 데까지는 남긴다
  */
 export const MESSAGE_STATUSES = ["pending", "streaming", "done", "error", "stopped"] as const;
+/** MESSAGE_STATUSES 의 값 하나 */
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
+
+/** 메시지를 쓴 쪽 */
+export const MESSAGE_ROLES = ["user", "assistant"] as const;
+/** MESSAGE_ROLES 의 값 하나 */
+export type MessageRole = (typeof MESSAGE_ROLES)[number];
 
 /** 대화 안의 문의 또는 답변 하나 */
 export interface Message {
   id: string;
-  role: "user" | "assistant";
+  role: MessageRole;
   /** 화면에 보이는 글 */
   content: string;
   status: MessageStatus;
@@ -90,14 +96,11 @@ export interface ResendTarget {
 /**
  * 답변 하나를 다시 받을 때 보낼 문의(그 답변 바로 앞의 유저 메시지)와 모델.
  *
- * @returns 답변을 찾지 못했거나 앞에 문의가 없거나 모델 기록이 없으면 null
+ * @returns 답변을 찾지 못했거나 앞에 문의가 없거나 모델 기록이 없으면 undefined
  */
-export function resendTargetOf(messages: Message[], assistantId: string): ResendTarget | null {
+export function resendTargetOf(messages: Message[], assistantId: string): ResendTarget | undefined {
   const index = messages.findIndex((m) => m.id === assistantId);
-  if (index === -1) {
-    return null;
-  }
+  const provider = messages[index]?.provider; // 못 찾으면 index 가 -1 이라 여기서 undefined
   const question = messages.slice(0, index).findLast((m) => m.role === "user");
-  const { provider } = messages[index];
-  return question && provider ? { question: question.content, provider } : null;
+  return question && provider ? { question: question.content, provider } : undefined;
 }

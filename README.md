@@ -73,7 +73,7 @@ uv run uvicorn --app-dir src theseal.api.main:app --reload --port 8000
 | `npm run format`     | 포맷 (Prettier). `format:check`는 검사만 |
 | `npm run typecheck`  | 타입 검사 (`tsc -b`)                     |
 
-테스트는 API 계층은 Node 환경, 화면은 jsdom 환경에서 돈다(파일 첫 줄 `// @vitest-environment jsdom`). jsdom 준비 때문에 전체 실행에 약 20초가 걸린다.
+테스트는 API 계층은 Node 환경, 화면은 jsdom 환경에서 돈다(파일 첫 줄 `// @vitest-environment jsdom`). 네트워크는 MSW, 사용자 동작은 user-event 로 흉내 낸다. jsdom 준비 때문에 전체 실행에 약 20초가 걸린다.
 
 ## 폴더 구조
 
@@ -86,11 +86,11 @@ src/
 │   ├── schemas.ts       # 서버 응답 검증 · snake_case → camelCase 변환 (zod)
 │   ├── sse.ts           # SSE 파서 (바이트 조각 → 이벤트)
 │   └── types.ts         # 화면 안의 API 데이터 형식
-├── providers/           # ApiProvider (클라이언트 주입) · TypewriterMemoryProvider
+├── providers/           # ApiProvider · StorageProvider (주입) · TypewriterMemoryProvider
 ├── hooks/
-│   ├── useApi.ts        # ApiProvider 가 끼운 클라이언트
-├── hooks/
-│   ├── useChat.ts       # 대화 목록 · 전송 · 중지 · 다시 시도 · 다시 생성 · 삭제
+│   ├── useApi.ts · useStorage.ts # Provider 가 끼운 클라이언트 · 저장소
+│   ├── useChat.ts       # 대화 목록 · 전송 · 중지 · 다시 시도 · 다시 생성
+│   ├── useChatHistory.ts · useUndoDelete.ts # 내역 상태 · 저장, 삭제 · 실행 취소
 │   ├── useHealth.ts     # 서버 상태 주기 확인
 │   ├── useTypewriter.ts # 타이핑 효과
 │   ├── useAutoScroll.ts # 자동 스크롤 + 사용자 개입 감지
@@ -101,8 +101,8 @@ src/
 │   ├── labels.ts        # 화면 표시 이름 (라벨 · 경로 · 툴 · 오류 안내)
 │   ├── history.ts       # 문의 내역 저장 · 불러오기 (v2, v1 저장본은 자동 변환)
 │   ├── markdown.ts      # 타이핑 중 서식 닫기 · 복사용 평문/HTML
-│   └── chat.ts · clipboard.ts
-├── components/          # Sidebar, ChatView, Composer, Markdown, MessageMeta, messages/ …
+│   └── chat.ts · clipboard.ts · logger.ts · storage.ts
+├── components/          # Sidebar, ChatView, Composer, Markdown, MessageMeta, ErrorBoundary, messages/ …
 ├── test/                # 테스트용 가짜 API 클라이언트 · Provider 래퍼
 ├── App.tsx
 └── main.tsx             # API 클라이언트를 만들어 Provider 로 끼운다 (VITE_API_MODE)

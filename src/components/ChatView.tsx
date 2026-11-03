@@ -11,6 +11,10 @@ const EXAMPLES = [
   "서울 날씨 어때요?",
 ];
 
+interface EmptyStateProps {
+  onPickExample: (text: string) => void;
+}
+
 interface ChatViewProps {
   messages: Message[];
   /** 답변을 받는 중 (다시 시도 · 다시 생성을 막는다) */
@@ -52,7 +56,9 @@ export function ChatView({
       <div
         ref={containerRef}
         className="min-h-0 flex-1 overflow-y-auto"
-        tabIndex={-1}
+        // 키보드로도 스크롤할 수 있게 Tab 으로 들어온다
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- 스크롤 영역은 포커스를 받아야 한다
+        tabIndex={0}
         role="region"
         aria-label="대화"
       >
@@ -61,12 +67,15 @@ export function ChatView({
             <EmptyState onPickExample={onPickExample} />
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
+              {/* 빈 화면의 제목과 같은 자리. 메시지 안 소제목의 윗단계 */}
+              <h1 className="sr-only">Seal 상담 도우미</h1>
               {messages.map((m) =>
                 m.role === "user" ? (
                   <UserMessage key={m.id} message={m} />
                 ) : (
                   <AssistantMessage
-                    key={m.id}
+                    // 다시 받기는 같은 id 에 createdAt 만 새로 찍는다 → 타이핑 · 알림 상태를 처음부터
+                    key={`${m.id}:${m.createdAt}`}
                     message={m}
                     onRetry={onRetry}
                     onRegenerate={onRegenerate}
@@ -93,7 +102,7 @@ export function ChatView({
   );
 }
 
-function EmptyState({ onPickExample }: { onPickExample: (text: string) => void }) {
+function EmptyState({ onPickExample }: EmptyStateProps) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6 text-center">
       <div>

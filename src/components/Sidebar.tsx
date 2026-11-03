@@ -6,13 +6,13 @@ import type { Conversation } from "../lib/chat";
 interface SidebarProps {
   health: HealthState;
   conversations: Conversation[];
-  currentId: string | null;
-  activeId: string | null;
+  currentId: string | undefined;
+  activeId: string | undefined;
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   /** 방금 지운 대화 (실행 취소 안내) */
-  lastDeleted: Conversation | null;
+  lastDeleted: Conversation | undefined;
   onUndoRemove: () => void;
   /** 내역 저장이 성공했는지. false 면 경고를 보인다 */
   isStorageOk: boolean;
@@ -37,7 +37,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={onNewChat}
-          aria-current={currentId === null ? "page" : undefined}
+          aria-current={currentId === undefined ? "page" : undefined}
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-left text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
         >
           + 새 문의

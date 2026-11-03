@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { flushSync } from "react-dom";
 
 import { useMediaQuery } from "./useMediaQuery";
 
@@ -31,8 +32,10 @@ export function useDrawer(): UseDrawerResult {
   const open = useCallback(() => setIsOpenState(true), []);
 
   const close = useCallback(() => {
-    setIsOpenState(false);
-    if (panelRef.current?.contains(document.activeElement)) {
+    const hadFocus = panelRef.current?.contains(document.activeElement);
+    // 여는 버튼은 덮개가 열린 동안 inert 인 <main> 안에 있어 포커스를 받지 못한다. 먼저 닫아 inert 를 푼다
+    flushSync(() => setIsOpenState(false));
+    if (hadFocus) {
       triggerRef.current?.focus();
     }
   }, []);

@@ -1,6 +1,8 @@
 // 클립보드 복사. 서식 있는 글(HTML) + 평문을 함께 넣고, 안 되면 평문만.
 // navigator.clipboard는 안전한 출처(https · localhost)에서만 동작한다 → 실패하면 execCommand로 다시 시도.
 
+import { logWarning } from "./logger";
+
 /** 서식 있는 글과 평문을 함께 넣는다. 지원하지 않으면 평문만. 성공하면 true */
 export async function copyRich(html: string, text: string): Promise<boolean> {
   try {
@@ -14,8 +16,8 @@ export async function copyRich(html: string, text: string): Promise<boolean> {
       ]);
       return true;
     }
-  } catch {
-    // 아래 평문 복사로
+  } catch (e) {
+    logWarning("서식 복사 실패. 평문으로 다시 시도한다", e);
   }
   return copyText(text);
 }
@@ -28,8 +30,8 @@ export async function copyText(text: string): Promise<boolean> {
       await clipboard.writeText(text);
       return true;
     }
-  } catch {
-    // 아래 예비 방법으로
+  } catch (e) {
+    logWarning("클립보드 쓰기 실패. execCommand 로 다시 시도한다", e);
   }
   return legacyCopy(text);
 }
@@ -44,7 +46,8 @@ function legacyCopy(text: string): boolean {
   textarea.select();
   try {
     return document.execCommand("copy");
-  } catch {
+  } catch (e) {
+    logWarning("execCommand 복사 실패", e);
     return false;
   } finally {
     textarea.remove();

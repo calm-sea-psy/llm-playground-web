@@ -2,10 +2,14 @@ import { memo } from "react";
 
 import type { Message } from "../../lib/chat";
 
+interface UserMessageProps {
+  message: Message;
+}
+
 /** 유저 문의: 오른쪽 말풍선 */
 export const UserMessage = memo(UserMessageView);
 
-function UserMessageView({ message }: { message: Message }) {
+function UserMessageView({ message }: UserMessageProps) {
   return (
     <div className="flex flex-col items-end gap-1">
       {message.regenerated ? <span className="text-xs text-zinc-500">↻ 다시 생성</span> : null}

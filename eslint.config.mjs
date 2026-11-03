@@ -58,6 +58,9 @@ export default defineConfig([
     rules: { ...tseslint.configs.disableTypeChecked.rules, ...base.configRules },
   },
 
-  // ---- Prettier: 포맷 관련 규칙을 전부 끈다. 반드시 마지막 ----
+  // ---- Prettier: 포맷 관련 규칙을 전부 끈다. 공유 규칙보다 뒤에 둔다 ----
   prettier,
+
+  // ---- prettier 가 함께 끈 curly 를 되살린다. "all" 은 Prettier 포맷과 부딪히지 않는다 ----
+  { files: base.files.source, rules: { curly: base.rules.curly } },
 ]);

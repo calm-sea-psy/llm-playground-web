@@ -3,8 +3,10 @@ import { useRef, useState } from "react";
 import type { Provider } from "./api/types";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProviderSelect } from "./components/ProviderSelect";
 import { Sidebar } from "./components/Sidebar";
+import { SidebarDrawer } from "./components/SidebarDrawer";
 import { ThemeSelect } from "./components/ThemeSelect";
 import { useAnnouncer } from "./hooks/useAnnouncer";
 import { useChat } from "./hooks/useChat";
@@ -14,9 +16,6 @@ import { useTheme } from "./hooks/useTheme";
 
 /** 서버 상태를 모를 때 쓰는 모델 */
 const FALLBACK_PROVIDER: Provider = "local";
-
-const DRAWER_PANEL_CLASS =
-  "fixed inset-y-0 left-0 z-40 flex shadow-xl transition-transform duration-200 motion-reduce:transition-none";
 
 /** 상담 도우미 화면: 사이드바(문의 내역 · 서버 상태) + 대화 + 입력창 */
 export function App() {
@@ -35,14 +34,14 @@ export function App() {
   const { message: announcement, announce } = useAnnouncer();
   const [draft, setDraft] = useState("");
   /** 사용자가 고르기 전에는 서버 기본값(defaultProvider)을 따른다 */
-  const [chosenProvider, setChosenProvider] = useState<Provider | null>(null);
+  const [chosenProvider, setChosenProvider] = useState<Provider>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const serverDefault = "health" in health ? health.health.defaultProvider : null;
+  const serverDefault = "health" in health ? health.health.defaultProvider : undefined;
   const provider = chosenProvider ?? serverDefault ?? FALLBACK_PROVIDER;
   // 요청은 한 번에 하나: 보고 있는 대화가 받는 중이면 중지 버튼, 다른 대화가 받는 중이면 전송을 막는다
-  const isBusyHere = chat.busy && chat.activeId === chat.currentId;
-  const isBusyElsewhere = chat.busy && !isBusyHere;
+  const isBusyHere = chat.isBusy && chat.activeId === chat.currentId;
+  const isBusyElsewhere = chat.isBusy && !isBusyHere;
 
   function handleNewChat(): void {
     chat.newChat();
@@ -68,23 +67,11 @@ export function App() {
 
   return (
     <div className="flex h-full">
-      {isDrawerOpen ? (
-        // 키보드로는 Esc 로 닫는다 (useDrawer). 배경은 마우스 · 터치용이라 포커스를 받지 않는다
-
-        <div className="fixed inset-0 z-30 bg-black/40" onClick={closeDrawer} aria-hidden="true" />
-      ) : null}
-      <div
-        ref={panelRef}
-        id="sidebar"
-        className={
-          isDrawer
-            ? `${DRAWER_PANEL_CLASS} ${isDrawerOpen ? "translate-x-0" : "-translate-x-full"}`
-            : "flex"
-        }
-        inert={!!isDrawer && !isDrawerOpen}
-        role={isDrawer ? "dialog" : undefined}
-        aria-modal={isDrawerOpen || undefined}
-        aria-label={isDrawer ? "메뉴" : undefined}
+      <SidebarDrawer
+        isDrawer={isDrawer}
+        isOpen={isDrawerOpen}
+        onClose={closeDrawer}
+        panelRef={panelRef}
       >
         <Sidebar
           health={health}
@@ -96,11 +83,12 @@ export function App() {
           onRemove={chat.remove}
           lastDeleted={chat.lastDeleted}
           onUndoRemove={chat.undoRemove}
-          isStorageOk={chat.storageOk}
+          isStorageOk={chat.isStorageOk}
         />
-      </div>
+      </SidebarDrawer>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      {/* 덮개가 열린 동안 Tab 이 덮개 뒤로 빠지지 않게 한다 */}
+      <main className="flex min-w-0 flex-1 flex-col" inert={isDrawerOpen}>
         <header className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
           {isDrawer ? (
             <button
@@ -115,20 +103,25 @@ export function App() {
               ☰
             </button>
           ) : null}
-          <ProviderSelect value={provider} onChange={setChosenProvider} disabled={chat.busy} />
+          <ProviderSelect value={provider} onChange={setChosenProvider} disabled={chat.isBusy} />
           <div className="ml-auto">
             <ThemeSelect value={theme} onChange={setTheme} />
           </div>
         </header>
-        <ChatView
+        {/* 대화 영역만 경계로 묶어 사이드바 · 입력창은 살려 둔다. 다른 대화로 옮기면 key 로 새로 그린다 */}
+        <ErrorBoundary
           key={chat.currentId ?? "new"}
-          messages={chat.messages}
-          isBusy={chat.busy}
-          onRetry={chat.retry}
-          onRegenerate={chat.regenerate}
-          onAnnounce={announce}
-          onPickExample={handlePickExample}
-        />
+          message="이 대화를 표시하지 못했습니다. 다른 문의를 고르거나 새로고침해 주세요."
+        >
+          <ChatView
+            messages={chat.messages}
+            isBusy={chat.isBusy}
+            onRetry={chat.retry}
+            onRegenerate={chat.regenerate}
+            onAnnounce={announce}
+            onPickExample={handlePickExample}
+          />
+        </ErrorBoundary>
         <Composer
           value={draft}
           onChange={setDraft}
@@ -140,7 +133,7 @@ export function App() {
         />
       </main>
 
-      <div aria-live="polite" className="sr-only" data-testid="announcer">
+      <div role="status" aria-live="polite" className="sr-only">
         {announcement}
       </div>
     </div>

@@ -6,6 +6,9 @@ export const API_MODE: "mock" | "http" = import.meta.env.VITE_API_MODE === "http
 /** API 주소 (http 모드). 비우면 같은 주소의 상대 경로(개발 중에는 Vite 프록시)로 보낸다 */
 export const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
+/** 하루 (ms). 문의 내역을 날짜로 묶을 때 쓴다 */
+export const DAY_MS = 24 * 60 * 60 * 1000;
+
 /** /health 확인 주기 */
 export const HEALTH_INTERVAL_MS = 30_000;
 
