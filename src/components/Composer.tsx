@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type KeyboardEvent, type RefObject } from "react";
+import { useId, useLayoutEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 
 import { charCount } from "../lib/chat";
 import { COMPOSER_MAX_HEIGHT_PX, MAX_INPUT_LENGTH } from "../lib/config";
@@ -30,6 +30,7 @@ export function Composer({
   isBlocked = false,
   inputRef,
 }: ComposerProps) {
+  const countId = useId();
   const localRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = inputRef ?? localRef;
   /** Safari 는 compositionend 가 keydown 보다 먼저 와서 합성을 끝낸 Enter 가 isComposing=false 로 들어온다 */
@@ -91,6 +92,8 @@ export function Composer({
           rows={1}
           placeholder="문의를 입력하세요"
           aria-label="문의 입력"
+          aria-describedby={countId}
+          aria-invalid={isTooLong || undefined}
           className="min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-zinc-400"
         />
         {isBusy ? (
@@ -128,6 +131,7 @@ export function Composer({
           </span>
         )}
         <span
+          id={countId}
           className={`shrink-0 tabular-nums ${isTooLong ? "font-medium text-red-600 dark:text-red-400" : ""}`}
         >
           {count.toLocaleString()} / {MAX_INPUT_LENGTH.toLocaleString()}

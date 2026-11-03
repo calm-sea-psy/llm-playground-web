@@ -245,7 +245,9 @@ server: {
 },
 ```
 
-## 6. 폴더 구조 (예정)
+## 6. 폴더 구조 (처음 계획)
+
+처음 세운 계획이다. 실제 구조는 README 의 "폴더 구조"를 본다 (`hooks/useHistory.ts` 는 만들지 않았고 저장은 `lib/history.ts` · `hooks/useChatHistory.ts`, 클라이언트는 `api/client.ts` 계약과 `httpClient.ts` · `mockClient.ts` 구현으로 나뉘었다).
 
 ```
 llm-playground-web/

@@ -110,6 +110,18 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("글자 수를 입력창 설명으로 잇고, 너무 길면 invalid 로 알린다", async () => {
+    const user = userEvent.setup();
+    const { textarea } = setup();
+    expect(textarea.hasAttribute("aria-invalid")).toBe(false);
+    const describedBy = textarea.getAttribute("aria-describedby") ?? "";
+    expect(document.getElementById(describedBy)?.textContent).toContain("0 / 2,000");
+
+    await fill(user, textarea, "가".repeat(2001));
+    expect(textarea.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(describedBy)?.textContent).toContain("너무 깁니다");
+  });
+
   it("보내지 못했으면(onSend false) 입력을 지우지 않는다", async () => {
     const user = userEvent.setup();
     const { textarea } = setup({ sendResult: false });

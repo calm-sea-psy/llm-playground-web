@@ -6,6 +6,7 @@ import { Composer } from "./components/Composer";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProviderSelect } from "./components/ProviderSelect";
 import { Sidebar } from "./components/Sidebar";
+import { SidebarDrawer } from "./components/SidebarDrawer";
 import { ThemeSelect } from "./components/ThemeSelect";
 import { useAnnouncer } from "./hooks/useAnnouncer";
 import { useChat } from "./hooks/useChat";
@@ -15,9 +16,6 @@ import { useTheme } from "./hooks/useTheme";
 
 /** 서버 상태를 모를 때 쓰는 모델 */
 const FALLBACK_PROVIDER: Provider = "local";
-
-const DRAWER_PANEL_CLASS =
-  "fixed inset-y-0 left-0 z-40 flex shadow-xl transition-transform duration-200 motion-reduce:transition-none";
 
 /** 상담 도우미 화면: 사이드바(문의 내역 · 서버 상태) + 대화 + 입력창 */
 export function App() {
@@ -69,23 +67,11 @@ export function App() {
 
   return (
     <div className="flex h-full">
-      {isDrawerOpen ? (
-        // 키보드로는 Esc 로 닫는다 (useDrawer). 배경은 마우스 · 터치용이라 포커스를 받지 않는다
-
-        <div className="fixed inset-0 z-30 bg-black/40" onClick={closeDrawer} aria-hidden="true" />
-      ) : null}
-      <div
-        ref={panelRef}
-        id="sidebar"
-        className={
-          isDrawer
-            ? `${DRAWER_PANEL_CLASS} ${isDrawerOpen ? "translate-x-0" : "-translate-x-full"}`
-            : "flex"
-        }
-        inert={!!isDrawer && !isDrawerOpen}
-        role={isDrawer ? "dialog" : undefined}
-        aria-modal={isDrawerOpen || undefined}
-        aria-label={isDrawer ? "메뉴" : undefined}
+      <SidebarDrawer
+        isDrawer={isDrawer}
+        isOpen={isDrawerOpen}
+        onClose={closeDrawer}
+        panelRef={panelRef}
       >
         <Sidebar
           health={health}
@@ -99,9 +85,10 @@ export function App() {
           onUndoRemove={chat.undoRemove}
           isStorageOk={chat.isStorageOk}
         />
-      </div>
+      </SidebarDrawer>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      {/* 덮개가 열린 동안 Tab 이 덮개 뒤로 빠지지 않게 한다 */}
+      <main className="flex min-w-0 flex-1 flex-col" inert={isDrawerOpen}>
         <header className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
           {isDrawer ? (
             <button

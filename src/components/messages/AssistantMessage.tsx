@@ -36,6 +36,13 @@ interface AnswerActionsProps {
   onRegenerate: () => void;
 }
 
+interface AnnounceOnceOptions {
+  isLive: boolean;
+  isDone: boolean;
+  message: Message;
+  onAnnounce: AssistantMessageProps["onAnnounce"];
+}
+
 /**
  * AI 답변: 왼쪽 전체 폭. 마크다운 본문 + 복사 · 다시 생성 + 처리 과정 배지.
  * 다시 받기는 createdAt 이 새로 찍혀 쓰는 쪽(ChatView)의 key 로 새로 만들어진다.
@@ -155,17 +162,7 @@ function AnswerActions({
 }
 
 /** 화면에서 받은 답변이 끝나면 한 번만 알린다 (오류는 ErrorMessage 의 role="alert" 가 알린다) */
-function useAnnounceOnce({
-  isLive,
-  isDone,
-  message,
-  onAnnounce,
-}: {
-  isLive: boolean;
-  isDone: boolean;
-  message: Message;
-  onAnnounce: AssistantMessageProps["onAnnounce"];
-}): void {
+function useAnnounceOnce({ isLive, isDone, message, onAnnounce }: AnnounceOnceOptions): void {
   const hasAnnouncedRef = useRef(false);
   useEffect(() => {
     if (!isLive || hasAnnouncedRef.current || !onAnnounce) {

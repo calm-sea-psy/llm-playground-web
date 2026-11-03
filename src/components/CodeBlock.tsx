@@ -3,8 +3,12 @@ import { isValidElement, useRef, type ReactNode } from "react";
 import { CopyButton } from "./CopyButton";
 import { copyText } from "../lib/clipboard";
 
+interface CodeBlockProps {
+  children?: ReactNode;
+}
+
 /** 코드 블록: 언어 이름 + 복사 버튼 (하이라이팅은 아직 없음) */
-export function CodeBlock({ children }: { children?: ReactNode }) {
+export function CodeBlock({ children }: CodeBlockProps) {
   const preRef = useRef<HTMLPreElement>(null);
   const language = languageOf(children);
 

@@ -2,9 +2,8 @@ import { memo } from "react";
 
 import { useNow } from "../hooks/useNow";
 import type { Conversation } from "../lib/chat";
+import { DAY_MS } from "../lib/config";
 import { sortByRecent } from "../lib/history";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface HistoryListProps {
   conversations: Conversation[];
@@ -13,8 +12,6 @@ interface HistoryListProps {
   activeId: string | undefined;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
-  /** 기준 시각 (테스트용). 없으면 현재 시각 */
-  now?: number;
 }
 
 interface DateGroup {
@@ -31,10 +28,8 @@ function HistoryListView({
   activeId,
   onSelect,
   onRemove,
-  now: fixedNow,
 }: HistoryListProps) {
-  const clock = useNow();
-  const now = fixedNow ?? clock;
+  const now = useNow();
   if (conversations.length === 0) {
     return <p className="px-1 text-xs text-zinc-400">아직 문의가 없습니다.</p>;
   }
@@ -49,6 +44,7 @@ function HistoryListView({
             {items.map((c) => {
               const isSelected = c.id === currentId;
               const isActive = c.id === activeId;
+              const title = c.title || "제목 없음";
               return (
                 <li key={c.id} className="group relative">
                   <button
@@ -62,12 +58,11 @@ function HistoryListView({
                     }`}
                   >
                     {isActive ? (
-                      <span
-                        className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
-                        aria-label="답변 받는 중"
-                      />
+                      <span className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse">
+                        <span className="sr-only">{"답변 받는 중 "}</span>
+                      </span>
                     ) : null}
-                    <span className="min-w-0 flex-1 truncate">{c.title || "제목 없음"}</span>
+                    <span className="min-w-0 flex-1 truncate">{title}</span>
                     <span className="shrink-0 text-[11px] font-normal text-zinc-400 tabular-nums">
                       {timeLabel(c.updatedAt, now)}
                     </span>
@@ -76,8 +71,8 @@ function HistoryListView({
                     <button
                       type="button"
                       onClick={() => onRemove(c.id)}
-                      aria-label={`문의 삭제: ${c.title}`}
-                      className="absolute top-1/2 right-1 -translate-y-1/2 rounded-md px-1.5 py-0.5 text-xs text-zinc-400 opacity-0 group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-700 focus-visible:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+                      aria-label={`문의 삭제: ${title}`}
+                      className="absolute top-1/2 right-1 -translate-y-1/2 rounded-md px-1.5 py-0.5 text-xs text-zinc-400 opacity-0 group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-700 focus-visible:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 pointer-coarse:opacity-100"
                     >
                       ✕
                     </button>

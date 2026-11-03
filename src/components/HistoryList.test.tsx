@@ -1,26 +1,33 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HistoryList } from "./HistoryList";
 import type { Conversation } from "../lib/chat";
-
-afterEach(cleanup);
+import { DAY_MS } from "../lib/config";
 
 const NOW = new Date(2026, 9, 13, 15, 0).getTime(); // 2026-10-13 15:00
-const DAY = 24 * 60 * 60 * 1000;
 
 function conversation(id: string, title: string, updatedAt: number): Conversation {
   return { id, title, createdAt: updatedAt, updatedAt, messages: [] };
 }
 
 const LIST = [
-  conversation("old", "오래된 문의", NOW - 30 * DAY),
+  conversation("old", "오래된 문의", NOW - 30 * DAY_MS),
   conversation("today", "오늘 문의", NOW - 60 * 60 * 1000),
-  conversation("yesterday", "어제 문의", NOW - DAY),
-  conversation("week", "지난주 문의", NOW - 3 * DAY),
+  conversation("yesterday", "어제 문의", NOW - DAY_MS),
+  conversation("week", "지난주 문의", NOW - 3 * DAY_MS),
 ];
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function setup(props: Partial<Parameters<typeof HistoryList>[0]> = {}) {
   const onSelect = vi.fn();
@@ -32,7 +39,6 @@ function setup(props: Partial<Parameters<typeof HistoryList>[0]> = {}) {
       activeId={undefined}
       onSelect={onSelect}
       onRemove={onRemove}
-      now={NOW}
       {...props}
     />,
   );
@@ -72,8 +78,13 @@ describe("HistoryList", () => {
     const user = userEvent.setup();
     const { onRemove } = setup({ activeId: "today" });
     expect(screen.queryByRole("button", { name: "문의 삭제: 오늘 문의" })).toBeNull();
-    expect(screen.getByLabelText("답변 받는 중")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^답변 받는 중.*오늘 문의/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "문의 삭제: 어제 문의" }));
     expect(onRemove).toHaveBeenCalledWith("yesterday");
+  });
+
+  it("제목이 비어 있으면 삭제 버튼도 제목 없음으로 읽힌다", () => {
+    setup({ conversations: [conversation("empty", "", NOW)] });
+    expect(screen.getByRole("button", { name: "문의 삭제: 제목 없음" })).toBeTruthy();
   });
 });

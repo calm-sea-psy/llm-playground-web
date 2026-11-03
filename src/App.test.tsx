@@ -152,13 +152,35 @@ describe("App", () => {
     expect(document.activeElement).toBe(menu);
   });
 
+  it("좁은 화면: 덮개가 열린 동안 main 은 inert 이고, 닫을 때 inert 를 푼 뒤 포커스를 돌려준다", async () => {
+    const user = userEvent.setup();
+    stubMatchMedia({ desktop: false, systemDark: false });
+    renderApp();
+    const main = screen.getByRole("main");
+    const menu = screen.getByRole("button", { name: /메뉴 열기/ });
+    expect(main.hasAttribute("inert")).toBe(false);
+
+    await user.click(menu);
+    expect(main.hasAttribute("inert")).toBe(true);
+
+    // 실제 브라우저는 inert 안의 요소에 포커스를 주지 않는다 (jsdom 은 흉내 내지 않아 시점을 직접 본다)
+    let wasInertAtFocus: boolean | undefined;
+    const focus = vi.spyOn(menu, "focus").mockImplementation(() => {
+      wasInertAtFocus = main.hasAttribute("inert");
+    });
+    await user.keyboard("{Escape}");
+    expect(focus).toHaveBeenCalledOnce();
+    expect(wasInertAtFocus).toBe(false);
+    expect(main.hasAttribute("inert")).toBe(false);
+  });
+
   it("좁은 화면: 배경을 누르거나 새 문의를 누르면 닫힌다", async () => {
     const user = userEvent.setup();
     stubMatchMedia({ desktop: false, systemDark: false });
     renderApp();
     const sidebar = document.getElementById("sidebar")!;
     await user.click(screen.getByRole("button", { name: /메뉴 열기/ }));
-    await user.click(document.querySelector(".bg-black\\/40")!);
+    await user.click(screen.getByTestId("drawer-backdrop"));
     expect(sidebar.hasAttribute("inert")).toBe(true);
 
     await user.click(screen.getByRole("button", { name: /메뉴 열기/ }));

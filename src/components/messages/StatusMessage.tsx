@@ -5,6 +5,10 @@ import { STAGE_MESSAGES } from "../../lib/labels";
 /** 경과 시간 갱신 간격 */
 const ELAPSED_TICK_MS = 1000;
 
+interface ElapsedProps {
+  since: number;
+}
+
 interface StatusMessageProps {
   /** 서버가 알려 준 단계. 없으면 아직 보내는 중 */
   stage?: StatusStage;
@@ -43,11 +47,12 @@ export function StatusMessage({ stage, since }: StatusMessageProps) {
   );
 }
 
-function Elapsed({ since }: { since: number }) {
+function Elapsed({ since }: ElapsedProps) {
   const now = useNow(ELAPSED_TICK_MS);
   const seconds = Math.max(0, Math.floor((now - since) / 1000));
+  // role="status" 안에서 매초 바뀌므로 스크린 리더가 계속 읽지 않게 숨긴다
   return (
-    <span className="text-xs text-zinc-400 tabular-nums" aria-label={`${seconds}초 경과`}>
+    <span className="text-xs text-zinc-400 tabular-nums" aria-hidden="true">
       {seconds}초
     </span>
   );
