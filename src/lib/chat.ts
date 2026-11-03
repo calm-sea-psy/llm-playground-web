@@ -100,10 +100,7 @@ export interface ResendTarget {
  */
 export function resendTargetOf(messages: Message[], assistantId: string): ResendTarget | undefined {
   const index = messages.findIndex((m) => m.id === assistantId);
-  if (index === -1) {
-    return undefined;
-  }
+  const provider = messages[index]?.provider; // 못 찾으면 index 가 -1 이라 여기서 undefined
   const question = messages.slice(0, index).findLast((m) => m.role === "user");
-  const { provider } = messages[index];
   return question && provider ? { question: question.content, provider } : undefined;
 }

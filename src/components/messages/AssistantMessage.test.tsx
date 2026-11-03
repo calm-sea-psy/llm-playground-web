@@ -197,11 +197,11 @@ describe("AssistantMessage", () => {
     await act(() => user.click(button));
 
     expect(write).toHaveBeenCalledOnce();
-    const item = write.mock.calls[0][0][0] as { items: Record<string, Blob> };
-    expect(await item.items["text/plain"].text()).toBe(
+    const item = write.mock.calls[0]![0][0] as { items: Record<string, Blob> };
+    expect(await item.items["text/plain"]!.text()).toBe(
       "배송은 3일 걸립니다.\n\n- 주문 내역 확인\n- 문의 접수",
     );
-    const copiedHtml = await item.items["text/html"].text();
+    const copiedHtml = await item.items["text/html"]!.text();
     expect(copiedHtml).toContain("<strong>3일</strong>");
     expect(copiedHtml).not.toContain("class=");
     expect(button.textContent).toBe("복사됨 ✓");

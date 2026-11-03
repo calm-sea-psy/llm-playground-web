@@ -108,19 +108,19 @@ describe("history", () => {
 
   it("pending · streaming으로 남은 답변은 stopped로 불러온다", () => {
     const c = conversation("a", 1);
-    c.messages[1] = { ...c.messages[1], status: "streaming", content: "받던 중" };
+    c.messages[1] = { ...c.messages[1]!, status: "streaming", content: "받던 중" };
     const d = conversation("b", 2);
-    d.messages[1] = { ...d.messages[1], status: "pending", content: "" };
+    d.messages[1] = { ...d.messages[1]!, status: "pending", content: "" };
     saveHistory(storage, [c, d]);
     const loaded = loadHistory(storage).conversations;
-    expect(loaded.map((x) => x.messages[1].status)).toEqual(["stopped", "stopped"]);
-    expect(loaded[1].messages[1].content).toBe("받던 중");
+    expect(loaded.map((x) => x.messages[1]!.status)).toEqual(["stopped", "stopped"]);
+    expect(loaded[1]!.messages[1]!.content).toBe("받던 중");
   });
 
   it("updatedAt이 없는 예전 저장본은 createdAt으로 채운다", () => {
     const { updatedAt: _u, ...old } = conversation("a", 5);
     localStorage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: [old] }));
-    expect(loadHistory(storage).conversations[0].updatedAt).toBe(5);
+    expect(loadHistory(storage).conversations[0]!.updatedAt).toBe(5);
   });
 
   it(`최신 ${MAX_CONVERSATIONS}개까지만 저장한다`, () => {
@@ -148,7 +148,7 @@ describe("history", () => {
     const loaded = loadHistory(storage).conversations;
     expect(loaded.length).toBeGreaterThan(0);
     expect(loaded.length).toBeLessThan(30);
-    expect(loaded[0].id).toBe("c29"); // 최신은 남는다
+    expect(loaded[0]!.id).toBe("c29"); // 최신은 남는다
   });
 
   it("localStorage를 쓸 수 없으면 false (예외를 던지지 않는다)", () => {
@@ -190,7 +190,7 @@ describe("history", () => {
     );
 
     const loaded = loadHistory(storage).conversations;
-    expect(loaded[0].messages[1].meta).toMatchObject({
+    expect(loaded[0]!.messages[1]!.meta).toMatchObject({
       requestId: "req-1",
       latencyMs: 1200,
       usage: { inputTokens: 3, outputTokens: 4 },
@@ -198,17 +198,17 @@ describe("history", () => {
 
     saveHistory(storage, loaded);
     expect(localStorage.getItem(LEGACY_HISTORY_KEY)).toBeNull();
-    expect(loadHistory(storage).conversations[0].messages[1].meta?.requestId).toBe("req-1");
+    expect(loadHistory(storage).conversations[0]!.messages[1]!.meta?.requestId).toBe("req-1");
   });
 
   it("메타 형식만 틀리면 그 메타만 버리고 메시지는 살린다", () => {
     const c = conversation("a", 1);
-    c.messages[1] = { ...c.messages[1], meta: { broken: true } as never };
+    c.messages[1] = { ...c.messages[1]!, meta: { broken: true } as never };
     localStorage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: [c] }));
 
     const [loaded] = loadHistory(storage).conversations;
-    expect(loaded.messages[1]).not.toHaveProperty("meta");
-    expect(loaded.messages[1].content).toBe("답변");
+    expect(loaded!.messages[1]).not.toHaveProperty("meta");
+    expect(loaded!.messages[1]!.content).toBe("답변");
   });
 
   // 예전 검사(requestId · label 문자열만 확인)를 통과해 렌더 중 예외로 이어지던 모양들
@@ -220,26 +220,26 @@ describe("history", () => {
     ["classification 이 label 만 있음", { ...META, classification: { label: "shipping" } }],
   ])("v2 메타가 어긋나면 버린다: %s", (_name, meta) => {
     const c = conversation("a", 1);
-    c.messages[1] = { ...c.messages[1], meta: meta as never };
+    c.messages[1] = { ...c.messages[1]!, meta: meta as never };
     localStorage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: [c] }));
 
     const [loaded] = loadHistory(storage).conversations;
-    expect(loaded.messages[1]).not.toHaveProperty("meta");
-    expect(loaded.messages[1].content).toBe("답변");
+    expect(loaded!.messages[1]).not.toHaveProperty("meta");
+    expect(loaded!.messages[1]!.content).toBe("답변");
   });
 
   it("v2 classification 이 어긋나면 그것만 버린다", () => {
     const c = conversation("a", 1);
     c.messages[1] = {
-      ...c.messages[1],
+      ...c.messages[1]!,
       meta: META,
       classification: { label: "shipping" } as never,
     };
     localStorage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: [c] }));
 
     const [loaded] = loadHistory(storage).conversations;
-    expect(loaded.messages[1]).not.toHaveProperty("classification");
-    expect(loaded.messages[1].meta).toEqual(META);
+    expect(loaded!.messages[1]).not.toHaveProperty("classification");
+    expect(loaded!.messages[1]!.meta).toEqual(META);
   });
 
   it.each([
@@ -251,14 +251,14 @@ describe("history", () => {
     const meta = await api.answerStream({ text, provider: "local" });
     const c = conversation("a", 1);
     c.messages[1] = {
-      ...c.messages[1],
+      ...c.messages[1]!,
       meta,
       ...(meta.classification && { classification: meta.classification }),
     };
     saveHistory(storage, [c]);
 
     const [loaded] = loadHistory(storage).conversations;
-    expect(loaded.messages[1].meta).toEqual(meta);
-    expect(loaded.messages[1].classification).toEqual(meta.classification);
+    expect(loaded!.messages[1]!.meta).toEqual(meta);
+    expect(loaded!.messages[1]!.classification).toEqual(meta.classification);
   });
 });

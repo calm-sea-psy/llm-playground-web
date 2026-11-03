@@ -97,8 +97,8 @@ describe("useChat", () => {
     });
     expect(stream.request).toEqual({ text: "배송이 늦어요", provider: "openai" });
     expect(result.current.conversations).toHaveLength(1);
-    expect(result.current.currentId).toBe(result.current.conversations[0].id);
-    expect(result.current.conversations[0].title).toBe("배송이 늦어요");
+    expect(result.current.currentId).toBe(result.current.conversations[0]!.id);
+    expect(result.current.conversations[0]!.title).toBe("배송이 늦어요");
     expect(result.current.activeId).toBe(result.current.currentId);
     const [user, assistant] = result.current.messages;
     expect(user).toMatchObject({ role: "user", content: "배송이 늦어요" });
@@ -148,7 +148,7 @@ describe("useChat", () => {
       "둘째 문의",
       "",
     ]);
-    expect(result.current.conversations[0].title).toBe("첫 문의");
+    expect(result.current.conversations[0]!.title).toBe("첫 문의");
   });
 
   it("답변 중에는 다시 보내지 않는다", () => {
@@ -178,7 +178,7 @@ describe("useChat", () => {
     await act(async () => result.current.stop());
     await waitFor(() => expect(result.current.isBusy).toBe(false));
     expect(result.current.messages[1]).toMatchObject({ status: "stopped", content: "받은 데까지" });
-    expect(stored()?.conversations[0].messages[1]).toMatchObject({
+    expect(stored()?.conversations[0]!.messages[1]).toMatchObject({
       status: "stopped",
       content: "받은 데까지",
     });
@@ -215,21 +215,21 @@ describe("useChat", () => {
 
     const second = controllableStream();
     act(() => {
-      result.current.retry(failed.id);
+      result.current.retry(failed!.id);
     });
     expect(second.request).toEqual({ text: "배송이 늦어요", provider: "openai" });
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[1]).toMatchObject({
-      id: failed.id,
+      id: failed!.id,
       status: "pending",
       content: "",
     });
-    expect(result.current.messages[1].error).toBeUndefined();
+    expect(result.current.messages[1]!.error).toBeUndefined();
     // 화면이 이 값으로 메시지를 새로 만든다. 같은 ms 에 다시 받아도 반드시 커진다
-    expect(result.current.messages[1].createdAt).toBeGreaterThan(failed.createdAt);
+    expect(result.current.messages[1]!.createdAt).toBeGreaterThan(failed!.createdAt);
 
     await second.resolve(response());
-    expect(result.current.messages[1].status).toBe("done");
+    expect(result.current.messages[1]!.status).toBe("done");
   });
 
   it("localStorage에는 보낸 직후 · done 때만 쓰고 delta마다 쓰지 않는다", async () => {
@@ -240,7 +240,7 @@ describe("useChat", () => {
       result.current.send("배송이 늦어요", "local");
     });
     expect(historyWrites(setItem)).toBe(1);
-    expect(stored()?.conversations[0].messages[1].status).toBe("pending");
+    expect(stored()?.conversations[0]!.messages[1]!.status).toBe("pending");
 
     for (let i = 0; i < 20; i++) {
       act(() => {
@@ -254,7 +254,7 @@ describe("useChat", () => {
 
     await stream.resolve(response());
     expect(historyWrites(setItem)).toBe(2);
-    expect(stored()?.conversations[0].messages[1].status).toBe("done");
+    expect(stored()?.conversations[0]!.messages[1]!.status).toBe("done");
   });
 
   it("받는 도중 다른 대화 · 새 문의로 옮겨도 답변은 원래 대화에서 계속 받는다", async () => {
@@ -291,7 +291,7 @@ describe("useChat", () => {
     act(() => {
       result.current.select(a);
     });
-    expect(result.current.messages[1].content).toBe("계속 받은 답변");
+    expect(result.current.messages[1]!.content).toBe("계속 받은 답변");
   });
 
   it("새로고침하면 내역과 마지막으로 보던 대화를 불러오고, 받던 답변은 stopped로", async () => {
@@ -305,7 +305,7 @@ describe("useChat", () => {
       stream.handlers.onDelta?.("받던 중");
     });
     // 받는 도중 탭을 닫은 것처럼: 저장본에는 pending으로 남아 있다
-    expect(stored()?.conversations[0].messages[1].status).toBe("pending");
+    expect(stored()?.conversations[0]!.messages[1]!.status).toBe("pending");
     expect(localStorage.getItem(CURRENT_KEY)).toBe(id);
     first.unmount();
 
@@ -330,11 +330,11 @@ describe("useChat", () => {
     }
     const ids = result.current.conversations.map((c) => c.id);
     act(() => {
-      result.current.select(ids[1]);
+      result.current.select(ids[1]!);
     });
 
     act(() => {
-      result.current.remove(ids[1]);
+      result.current.remove(ids[1]!);
     });
     expect(result.current.conversations.map((c) => c.id)).toEqual([ids[0], ids[2]]);
     expect(result.current.currentId).toBeUndefined(); // 보던 대화를 지우면 새 문의 화면
@@ -349,7 +349,7 @@ describe("useChat", () => {
     expect(stored()?.conversations).toHaveLength(3);
 
     act(() => {
-      result.current.remove(ids[0]);
+      result.current.remove(ids[0]!);
     });
     act(() => {
       vi.advanceTimersByTime(UNDO_DELETE_MS);
@@ -380,7 +380,7 @@ describe("useChat", () => {
     });
     expect(result.current.isStorageOk).toBe(false);
     await stream.resolve(response());
-    expect(result.current.messages[1].status).toBe("done");
+    expect(result.current.messages[1]!.status).toBe("done");
   });
 
   it("다시 생성은 같은 문의 · 같은 모델을 대화 끝에 새 쌍으로 보낸다 (원래 답변은 그대로)", async () => {
@@ -394,7 +394,7 @@ describe("useChat", () => {
 
     const second = controllableStream();
     act(() => {
-      expect(result.current.regenerate(original.id)).toBe(true);
+      expect(result.current.regenerate(original!.id)).toBe(true);
     });
     expect(second.request).toEqual({ text: "배송이 늦어요", provider: "openai" });
     expect(result.current.messages).toHaveLength(4);
@@ -421,10 +421,10 @@ describe("useChat", () => {
     act(() => {
       result.current.send("배송이 늦어요", "local");
     });
-    expect(result.current.messages[1].finishedAt).toBeUndefined();
+    expect(result.current.messages[1]!.finishedAt).toBeUndefined();
     await stream.resolve(response());
     const m = result.current.messages[1];
-    expect(m.finishedAt).toBeGreaterThanOrEqual(m.createdAt);
+    expect(m!.finishedAt).toBeGreaterThanOrEqual(m!.createdAt);
   });
 
   it("network 오류면 onNetworkError를 부른다 (서버 상태 다시 확인)", async () => {

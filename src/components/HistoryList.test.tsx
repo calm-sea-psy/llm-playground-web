@@ -55,9 +55,9 @@ describe("HistoryList", () => {
       "지난 7일",
       "이전",
     ]);
-    expect(within(groups[0]).getByText("오늘 문의")).toBeTruthy();
-    expect(within(groups[0]).getByText("14:00")).toBeTruthy();
-    expect(within(groups[3]).getByText("9.13")).toBeTruthy();
+    expect(within(groups[0]!).getByText("오늘 문의")).toBeTruthy();
+    expect(within(groups[0]!).getByText("14:00")).toBeTruthy();
+    expect(within(groups[3]!).getByText("9.13")).toBeTruthy();
   });
 
   it("비어 있으면 안내 문구", () => {
