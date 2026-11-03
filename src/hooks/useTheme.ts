@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { useMediaQuery } from "./useMediaQuery";
 import { THEMES, type Theme } from "../lib/labels";
+import { logWarning } from "../lib/logger";
 
 /** 고른 테마 저장 키. index.html 의 인라인 스크립트도 같은 키를 읽는다 */
 export const THEME_KEY = "seal-frontend:theme";
@@ -36,8 +37,8 @@ export function useTheme(): UseThemeResult {
       } else {
         localStorage.setItem(THEME_KEY, next);
       }
-    } catch {
-      // 저장이 안 되어도 지금 화면에는 적용된다
+    } catch (e) {
+      logWarning("테마를 저장하지 못했다", e); // 지금 화면에는 적용된다
     }
   }
 
@@ -48,7 +49,8 @@ function readTheme(): Theme {
   try {
     const value = localStorage.getItem(THEME_KEY);
     return THEMES.find((t) => t !== "system" && t === value) ?? "system";
-  } catch {
+  } catch (e) {
+    logWarning("저장된 테마를 읽지 못했다", e);
     return "system";
   }
 }

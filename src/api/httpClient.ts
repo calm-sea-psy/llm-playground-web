@@ -10,6 +10,7 @@ import {
 } from "./schemas";
 import { SseParser, type SseMessage } from "./sse";
 import type { AnswerRequest, AnswerResponse, Health } from "./types";
+import { logWarning } from "../lib/logger";
 
 /** 실제 서버 클라이언트 설정 */
 export interface HttpApiClientOptions {
@@ -96,15 +97,11 @@ export function createHttpApiClient({ baseUrl, healthTimeoutMs }: HttpApiClientO
       }
     } finally {
       // done 을 받은 뒤 · 오류로 빠져나올 때 연결을 정리한다 (이미 끝났으면 아무 일도 없다)
-      reader.cancel().catch(ignore);
+      reader.cancel().catch((e: unknown) => logWarning("스트림 정리 실패", e));
     }
   }
 
   return { getHealth, answerStream };
-}
-
-function ignore(): void {
-  // 정리 중 오류는 무시한다
 }
 
 /** 이벤트 하나를 처리한다. done 이면 그 AnswerResponse 를 돌려준다. 모르는 이벤트는 무시한다 */

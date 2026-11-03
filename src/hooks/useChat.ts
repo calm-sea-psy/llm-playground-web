@@ -12,6 +12,7 @@ import {
   type Message,
 } from "../lib/chat";
 import { loadHistory, saveCurrentId, saveHistory, type LoadedHistory } from "../lib/history";
+import { logWarning } from "../lib/logger";
 
 /** 삭제 뒤 실행 취소를 받을 수 있는 시간 */
 export const UNDO_DELETE_MS = 5000;
@@ -144,6 +145,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         if (e instanceof AnswerStreamError && e.code === "aborted") {
           update((m) => ({ ...m, status: "stopped", finishedAt: Date.now() }), true);
         } else {
+          logWarning("답변 요청 실패", e); // 화면에는 code · message 만 남아 원본은 여기서 본다
           const error = toAnswerError(e);
           update((m) => ({ ...m, status: "error", error, finishedAt: Date.now() }), true);
           if (error.code === "network") {

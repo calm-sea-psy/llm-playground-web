@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { logWarning } from "../lib/logger";
+
 /** "복사됨" 표시를 유지하는 시간 */
 const FEEDBACK_MS = 2000;
 
@@ -25,7 +27,12 @@ export function CopyButton({ onCopy, ariaLabel }: CopyButtonProps) {
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
   async function handleClick(): Promise<void> {
-    const isCopied = await onCopy();
+    let isCopied = false;
+    try {
+      isCopied = await onCopy();
+    } catch (e) {
+      logWarning("복사 실패", e);
+    }
     setState(isCopied ? "copied" : "failed");
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setState("idle"), FEEDBACK_MS);
