@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useMediaQuery } from "./useMediaQuery";
 import { THEMES, type Theme } from "../lib/labels";
 
+/** 고른 테마 저장 키. index.html 의 인라인 스크립트도 같은 키를 읽는다 */
 export const THEME_KEY = "seal-frontend:theme";
 
 /** useTheme 이 돌려주는 선택값과 변경 함수 */

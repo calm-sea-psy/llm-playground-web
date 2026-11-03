@@ -1,21 +1,35 @@
 // 화면 안에서 쓰는 API 데이터 형식 (camelCase).
 // 서버 응답(snake_case)은 httpClient 가 schemas.ts 로 검증 · 변환해서 이 형식으로 넘긴다.
 
+/** 답변 모델 제공자 */
 export const PROVIDERS = ["local", "openai"] as const;
+/** PROVIDERS 의 값 하나 */
 export type Provider = (typeof PROVIDERS)[number];
 
+/** 서버의 LLM 검증 모드 */
 export const VERIFY_MODES = ["off", "uncertain", "all"] as const;
+/** VERIFY_MODES 의 값 하나 */
 export type VerifyMode = (typeof VERIFY_MODES)[number];
 
+/** 분류 라벨 */
 export const LABELS = ["shipping", "refund", "account", "unknown"] as const;
+/** LABELS 의 값 하나 */
 export type Label = (typeof LABELS)[number];
 
+/** 경로 규칙의 판정 */
 export const ROUTES = ["confident", "low_confidence", "ambiguous", "unknown"] as const;
+/** ROUTES 의 값 하나 */
 export type Route = (typeof ROUTES)[number];
 
 /** /api/answer/stream 의 status 이벤트 단계. adventure = 범위 밖(unknown) 문의 (delta 없이 done 에 전체 답변) */
 export const STATUS_STAGES = ["classifying", "answering", "adventure"] as const;
+/** STATUS_STAGES 의 값 하나 */
 export type StatusStage = (typeof STATUS_STAGES)[number];
+
+/** 답변 결과의 상태 */
+export const ANSWER_STATUSES = ["ok", "error"] as const;
+/** ANSWER_STATUSES 의 값 하나 */
+export type AnswerStatus = (typeof ANSWER_STATUSES)[number];
 
 /** 서버 상태 (/health) */
 export interface Health {
@@ -70,11 +84,13 @@ export interface ToolCall {
 /** 서버 오류 코드. 이 밖의 값도 올 수 있어 화면은 문자열로 다룬다 */
 export type ErrorCode = "invalid_input" | "config_error" | "llm_error" | "llm_timeout";
 
+/** 오류 내용. code 는 서버 error.code 또는 AnswerStreamError code */
 export interface AnswerError {
   code: string;
   message: string;
 }
 
+/** 답변에 쓴 토큰 수. 모델이 알려 주지 않으면 null */
 export interface TokenUsage {
   inputTokens: number | null;
   outputTokens: number | null;
@@ -83,7 +99,7 @@ export interface TokenUsage {
 /** 답변 결과 (done 이벤트). status 가 "error" 면 answer 는 null 이고 error 가 있다 */
 export interface AnswerResponse {
   requestId: string;
-  status: "ok" | "error";
+  status: AnswerStatus;
   label: string;
   answer: string | null;
   provider: Provider;
@@ -98,6 +114,7 @@ export interface AnswerResponse {
   classification: RoutingResult | null;
 }
 
+/** 답변 스트림의 status 이벤트 */
 export interface StatusEvent {
   stage: StatusStage;
   message: string;

@@ -1,10 +1,12 @@
 // 화면 표시 이름은 이 파일 한 곳에 모은다.
 // (분류기 라벨이 나중에 enum 숫자로 바뀌어도 여기만 고친다)
 
-import type { Label, Provider, Route, StatusStage, VerifyMode } from "../api/types";
+import type { AnswerStreamErrorCode } from "../api/client";
+import type { ErrorCode, Label, Provider, Route, StatusStage, VerifyMode } from "../api/types";
 
 /** 화면 테마 */
 export const THEMES = ["system", "light", "dark"] as const;
+/** THEMES 의 값 하나 */
 export type Theme = (typeof THEMES)[number];
 
 /** 오류 안내 문장과 다시 시도 버튼을 보일지 */
@@ -14,11 +16,13 @@ export interface ErrorGuide {
   retry: boolean;
 }
 
+/** 답변 모델 제공자 표시 이름 */
 export const PROVIDER_NAMES: Record<Provider, string> = {
   local: "로컬",
   openai: "OpenAI",
 };
 
+/** 검증 모드 표시 이름 */
 export const VERIFY_MODE_NAMES: Record<VerifyMode, string> = {
   off: "검증 끔",
   uncertain: "불확실할 때 검증",
@@ -32,6 +36,7 @@ export const STAGE_MESSAGES: Record<StatusStage, string> = {
   adventure: "챗봇이 알 수 없는 것을 찾아 모험을 떠나는 중...",
 };
 
+/** 테마 표시 이름 */
 export const THEME_NAMES: Record<Theme, string> = {
   system: "시스템",
   light: "라이트",
@@ -61,7 +66,10 @@ const TOOL_NAMES: Partial<Record<string, string>> = {
   web_search: "웹 검색",
 };
 
-/** 오류 코드별 안내 (서버 error.code + 화면 쪽 AnswerStreamError code) */
+/**
+ * 오류 코드별 안내 (서버 error.code + 화면 쪽 AnswerStreamError code).
+ * aborted 는 오류가 아니라 중지(stopped)로 그려서 안내가 없다.
+ */
 const ERROR_GUIDES: Partial<Record<string, ErrorGuide>> = {
   config_error: { text: "서버 설정을 확인하세요 (분류 모델이나 API 키가 없습니다).", retry: true },
   llm_error: { text: "모델 서버(Ollama)가 꺼져 있을 수 있습니다.", retry: true },
@@ -73,7 +81,7 @@ const ERROR_GUIDES: Partial<Record<string, ErrorGuide>> = {
   network: { text: "API 서버에 연결할 수 없습니다.", retry: true },
   incomplete: { text: "답변을 끝까지 받지 못했습니다 (연결이 끊겼습니다).", retry: true },
   bad_response: { text: "서버 응답 형식이 올바르지 않습니다.", retry: true },
-};
+} satisfies Record<ErrorCode | Exclude<AnswerStreamErrorCode, "aborted">, ErrorGuide>;
 
 const UNKNOWN_ERROR_GUIDE: ErrorGuide = { text: "알 수 없는 오류가 발생했습니다.", retry: true };
 

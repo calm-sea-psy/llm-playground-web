@@ -140,7 +140,7 @@ export function App() {
         />
       </main>
 
-      <div aria-live="polite" className="sr-only" data-testid="announcer">
+      <div role="status" aria-live="polite" className="sr-only">
         {announcement}
       </div>
     </div>

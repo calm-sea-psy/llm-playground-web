@@ -7,12 +7,15 @@
 
 import { z } from "zod";
 
-import { MESSAGE_STATUSES, type Conversation, type Message } from "./chat";
+import { MESSAGE_ROLES, MESSAGE_STATUSES, type Conversation, type Message } from "./chat";
 import { answerResponseSchema, routingResultSchema } from "../api/schemas";
 import { PROVIDERS, STATUS_STAGES, type AnswerResponse, type RoutingResult } from "../api/types";
 
+/** 문의 내역 저장 키 (v2) */
 export const HISTORY_KEY = "seal-frontend:conversations:v2";
+/** 예전 저장본 키. 불러올 때만 읽고 다음 저장 때 지운다 */
 export const LEGACY_HISTORY_KEY = "seal-frontend:conversations:v1";
+/** 마지막으로 보던 대화 저장 키 */
 export const CURRENT_KEY = "seal-frontend:current:v1";
 
 /** 보관 한도 (최신순). 대화 하나는 메타까지 수 KB → localStorage 한도(약 5MB) 안에 넉넉하다 */
@@ -138,7 +141,7 @@ function conversationSchema(readers: MetaReaders): z.ZodType<Conversation> {
   const messageSchema = z
     .object({
       id: z.string(),
-      role: z.enum(["user", "assistant"]),
+      role: z.enum(MESSAGE_ROLES),
       content: z.string(),
       status: z.enum(MESSAGE_STATUSES),
       createdAt: z.number(),

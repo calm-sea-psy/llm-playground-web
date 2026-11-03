@@ -4,6 +4,7 @@
 import { z } from "zod";
 
 import {
+  ANSWER_STATUSES,
   LABELS,
   PROVIDERS,
   ROUTES,
@@ -81,7 +82,7 @@ const toolCallSchema = z.object({
 export const answerResponseSchema = z
   .object({
     request_id: z.string(),
-    status: z.enum(["ok", "error"]),
+    status: z.enum(ANSWER_STATUSES),
     label: z.string(),
     answer: z.string().nullable(),
     provider: z.enum(PROVIDERS),
