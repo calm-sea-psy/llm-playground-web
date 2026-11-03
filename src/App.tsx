@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import type { Provider } from "./api/types";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProviderSelect } from "./components/ProviderSelect";
 import { Sidebar } from "./components/Sidebar";
 import { ThemeSelect } from "./components/ThemeSelect";
@@ -120,15 +121,20 @@ export function App() {
             <ThemeSelect value={theme} onChange={setTheme} />
           </div>
         </header>
-        <ChatView
+        {/* 대화 영역만 경계로 묶어 사이드바 · 입력창은 살려 둔다. 다른 대화로 옮기면 key 로 새로 그린다 */}
+        <ErrorBoundary
           key={chat.currentId ?? "new"}
-          messages={chat.messages}
-          isBusy={chat.busy}
-          onRetry={chat.retry}
-          onRegenerate={chat.regenerate}
-          onAnnounce={announce}
-          onPickExample={handlePickExample}
-        />
+          message="이 대화를 표시하지 못했습니다. 다른 문의를 고르거나 새로고침해 주세요."
+        >
+          <ChatView
+            messages={chat.messages}
+            isBusy={chat.busy}
+            onRetry={chat.retry}
+            onRegenerate={chat.regenerate}
+            onAnnounce={announce}
+            onPickExample={handlePickExample}
+          />
+        </ErrorBoundary>
         <Composer
           value={draft}
           onChange={setDraft}

@@ -6,6 +6,7 @@ import type { ApiClient } from "./api/client";
 import { createHttpApiClient } from "./api/httpClient";
 import { createMockApiClient } from "./api/mockClient";
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { API_BASE, API_MODE, HEALTH_TIMEOUT_MS } from "./lib/config";
 import { ApiProvider } from "./providers/ApiProvider";
 import { TypewriterMemoryProvider } from "./providers/TypewriterMemoryProvider";
@@ -18,10 +19,12 @@ const api: ApiClient =
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ApiProvider client={api}>
-      <TypewriterMemoryProvider>
-        <App />
-      </TypewriterMemoryProvider>
-    </ApiProvider>
+    <ErrorBoundary message="화면을 표시하지 못했습니다. 새로고침해 주세요.">
+      <ApiProvider client={api}>
+        <TypewriterMemoryProvider>
+          <App />
+        </TypewriterMemoryProvider>
+      </ApiProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );
