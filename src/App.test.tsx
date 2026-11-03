@@ -12,7 +12,9 @@ function stubMatchMedia({ desktop, systemDark }: { desktop: boolean; systemDark:
   const listeners = new Map<string, Set<() => void>>();
   const state = { desktop, systemDark };
   const matches = (query: string): boolean => {
-    if (query.includes("min-width")) return state.desktop;
+    if (query.includes("min-width")) {
+      return state.desktop;
+    }
     return query.includes("dark") && state.systemDark;
   };
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -21,7 +23,9 @@ function stubMatchMedia({ desktop, systemDark }: { desktop: boolean; systemDark:
     },
     media: query,
     addEventListener: (_: string, cb: () => void) => {
-      if (!listeners.has(query)) listeners.set(query, new Set());
+      if (!listeners.has(query)) {
+        listeners.set(query, new Set());
+      }
       listeners.get(query)!.add(cb);
     },
     removeEventListener: (_: string, cb: () => void) => listeners.get(query)?.delete(cb),

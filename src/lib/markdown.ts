@@ -18,13 +18,20 @@ export function closeOpenMarkdown(typed: string): string {
   for (const line of lines) {
     const match = FENCE.exec(line);
     if (match) {
-      if (fence === null) fence = match[1];
-      else if (match[1] === fence) fence = null;
+      if (fence === null) {
+        fence = match[1];
+      } else if (match[1] === fence) {
+        fence = null;
+      }
       continue;
     }
-    if (fence === null) outside.push(line);
+    if (fence === null) {
+      outside.push(line);
+    }
   }
-  if (fence !== null) return `${text}\n${fence}`;
+  if (fence !== null) {
+    return `${text}\n${fence}`;
+  }
 
   // 인라인 코드를 먼저 닫고(굵게 안의 코드 **`/a` 를 위해), 그다음 굵게를 센다
   let result = text;
@@ -40,8 +47,12 @@ export function closeOpenMarkdown(typed: string): string {
   const withoutCode = outsideText.replace(/`[^`\n]*`/g, "");
   const bolds = (withoutCode.match(/\*\*/g) ?? []).length;
   if (bolds % 2 === 1) {
-    if (result.endsWith("**")) return result.slice(0, -2);
-    if (result.endsWith("*")) result = result.slice(0, -1);
+    if (result.endsWith("**")) {
+      return result.slice(0, -2);
+    }
+    if (result.endsWith("*")) {
+      result = result.slice(0, -1);
+    }
     // 공백 바로 뒤의 **는 닫는 기호로 인정되지 않는다(CommonMark) → 끝 공백을 지우고 닫는다
     return `${result.replace(/\s+$/, "")}**`;
   }
@@ -79,17 +90,23 @@ export function toPlainText(root: HTMLElement): string {
   const out: string[] = [];
   const newline = (count = 1): void => {
     const tail = /\n*$/.exec(out.join(""))?.[0].length ?? 0;
-    if (out.length && tail < count) out.push("\n".repeat(count - tail));
+    if (out.length && tail < count) {
+      out.push("\n".repeat(count - tail));
+    }
   };
 
   const walk = (node: Node, depth: number): void => {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent ?? "";
-      if (!text.trim() && STRUCTURAL.has(node.parentElement?.tagName ?? "")) return;
+      if (!text.trim() && STRUCTURAL.has(node.parentElement?.tagName ?? "")) {
+        return;
+      }
       out.push(text);
       return;
     }
-    if (!(node instanceof HTMLElement) || node.hasAttribute("data-copy-ignore")) return;
+    if (!(node instanceof HTMLElement) || node.hasAttribute("data-copy-ignore")) {
+      return;
+    }
     const tag = node.tagName;
     if (tag === "BR") {
       out.push("\n");
@@ -126,9 +143,13 @@ export function toPlainText(root: HTMLElement): string {
     }
     const block = BLOCKS.has(tag);
     const listLike = tag === "UL" || tag === "OL";
-    if (block) newline(listLike && depth > 0 ? 1 : 2);
+    if (block) {
+      newline(listLike && depth > 0 ? 1 : 2);
+    }
     node.childNodes.forEach((child) => walk(child, depth));
-    if (block) newline(listLike && depth > 0 ? 1 : 2);
+    if (block) {
+      newline(listLike && depth > 0 ? 1 : 2);
+    }
   };
 
   root.childNodes.forEach((child) => walk(child, 0));

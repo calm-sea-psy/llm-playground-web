@@ -38,7 +38,9 @@ export class SseParser {
     const messages: SseMessage[] = [];
     for (const block of blocks) {
       const message = parseBlock(block);
-      if (message) messages.push(message);
+      if (message) {
+        messages.push(message);
+      }
     }
     return messages;
   }
@@ -48,13 +50,20 @@ function parseBlock(block: string): SseMessage | null {
   let event = "message";
   const data: string[] = [];
   for (const line of block.split("\n")) {
-    if (line === "" || line.startsWith(":")) continue;
+    if (line === "" || line.startsWith(":")) {
+      continue;
+    }
     const colon = line.indexOf(":");
     const field = colon === -1 ? line : line.slice(0, colon);
     let value = colon === -1 ? "" : line.slice(colon + 1);
-    if (value.startsWith(" ")) value = value.slice(1);
-    if (field === "event") event = value;
-    else if (field === "data") data.push(value);
+    if (value.startsWith(" ")) {
+      value = value.slice(1);
+    }
+    if (field === "event") {
+      event = value;
+    } else if (field === "data") {
+      data.push(value);
+    }
   }
   return data.length ? { event, data: data.join("\n") } : null;
 }

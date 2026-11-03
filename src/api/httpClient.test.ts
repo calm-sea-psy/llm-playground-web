@@ -55,8 +55,12 @@ function streamResponse(
   const body = new ReadableStream<Uint8Array>({
     pull(controller) {
       const next = queue.shift();
-      if (next !== undefined) return void controller.enqueue(encoder.encode(next));
-      if (!hang) return void controller.close();
+      if (next !== undefined) {
+        return void controller.enqueue(encoder.encode(next));
+      }
+      if (!hang) {
+        return void controller.close();
+      }
       return new Promise<void>((resolve) => {
         signal?.addEventListener("abort", () => {
           controller.error(new DOMException("This operation was aborted", "AbortError"));
@@ -145,7 +149,9 @@ describe("answerStream", () => {
     // 한글 바이트 중간을 지나도록 3바이트씩 흘린다
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        for (let i = 0; i < bytes.length; i += 3) controller.enqueue(bytes.slice(i, i + 3));
+        for (let i = 0; i < bytes.length; i += 3) {
+          controller.enqueue(bytes.slice(i, i + 3));
+        }
         controller.close();
       },
     });

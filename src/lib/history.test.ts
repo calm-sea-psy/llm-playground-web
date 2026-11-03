@@ -117,7 +117,9 @@ describe("history", () => {
       key: string,
       value: string,
     ) {
-      if (value.length > 3000) throw new DOMException("full", "QuotaExceededError");
+      if (value.length > 3000) {
+        throw new DOMException("full", "QuotaExceededError");
+      }
       real.call(this, key, value);
     });
     const many = Array.from({ length: 30 }, (_, i) => conversation(`c${i}`, i));

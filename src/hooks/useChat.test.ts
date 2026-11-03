@@ -238,10 +238,11 @@ describe("useChat", () => {
     expect(historyWrites(setItem)).toBe(1);
     expect(stored()?.conversations[0].messages[1].status).toBe("pending");
 
-    for (let i = 0; i < 20; i++)
+    for (let i = 0; i < 20; i++) {
       act(() => {
         stream.handlers.onDelta?.("글자 ");
       });
+    }
     act(() => {
       stream.handlers.onStatus?.({ stage: "answering", message: "" });
     });
