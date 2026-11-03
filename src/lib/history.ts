@@ -8,8 +8,17 @@
 import { z } from "zod";
 
 import { MESSAGE_ROLES, MESSAGE_STATUSES, type Conversation, type Message } from "./chat";
+import { logWarning } from "./logger";
 import { answerResponseSchema, routingResultSchema } from "../api/schemas";
-import { PROVIDERS, STATUS_STAGES, type AnswerResponse, type RoutingResult } from "../api/types";
+import {
+  ANSWER_STATUSES,
+  LABELS,
+  PROVIDERS,
+  ROUTES,
+  STATUS_STAGES,
+  type AnswerResponse,
+  type RoutingResult,
+} from "../api/types";
 
 /** 문의 내역 저장 키 (v2) */
 export const HISTORY_KEY = "seal-frontend:conversations:v2";
@@ -37,16 +46,57 @@ interface MetaReaders {
   classification: z.ZodType<RoutingResult | undefined>;
 }
 
-// v2 메타는 이 앱이 쓴 값이라 모양만 확인한다. 맞지 않으면 그 메타만 버린다
+const answerErrorSchema = z.object({ code: z.string(), message: z.string() });
+
+/** 화면 형식(camelCase) 그대로 저장한 RoutingResult */
+const storedRoutingResultSchema: z.ZodType<RoutingResult> = z.object({
+  label: z.enum(LABELS),
+  text: z.string(),
+  classifierLabel: z.string(),
+  scores: z.record(z.string(), z.number()),
+  route: z
+    .object({ route: z.enum(ROUTES), p1: z.number(), margin: z.number(), reason: z.string() })
+    .nullable(),
+  verification: z
+    .object({
+      match: z.boolean(),
+      reason: z.string(),
+      finalLabel: z.string(),
+      latencyMs: z.number(),
+      error: z.string().nullable(),
+    })
+    .nullable(),
+});
+
+/** 화면 형식(camelCase) 그대로 저장한 AnswerResponse */
+const storedAnswerResponseSchema: z.ZodType<AnswerResponse> = z.object({
+  requestId: z.string(),
+  status: z.enum(ANSWER_STATUSES),
+  label: z.string(),
+  answer: z.string().nullable(),
+  provider: z.enum(PROVIDERS),
+  model: z.string(),
+  promptVersion: z.string(),
+  toolsUsed: z.array(
+    z.object({
+      name: z.string(),
+      args: z.record(z.string(), z.unknown()),
+      ok: z.boolean(),
+      error: z.string().nullable(),
+      latencyMs: z.number(),
+    }),
+  ),
+  latencyMs: z.number(),
+  usage: z.object({ inputTokens: z.number().nullable(), outputTokens: z.number().nullable() }),
+  error: answerErrorSchema.nullable(),
+  createdAt: z.string(),
+  classification: storedRoutingResultSchema.nullable(),
+});
+
+// v2 메타도 렌더링이 그대로 읽는 값이라 전체 모양을 검증한다 (틀리면 렌더 중 예외). 맞지 않으면 그 메타만 버린다
 const V2_READERS: MetaReaders = {
-  meta: z
-    .custom<AnswerResponse>((v) => isObject(v) && typeof v.requestId === "string")
-    .optional()
-    .catch(undefined),
-  classification: z
-    .custom<RoutingResult>((v) => isObject(v) && typeof v.label === "string")
-    .optional()
-    .catch(undefined),
+  meta: storedAnswerResponseSchema.optional().catch(undefined),
+  classification: storedRoutingResultSchema.optional().catch(undefined),
 };
 
 // v1 메타는 서버 형식 → 서버 응답과 같은 스키마로 바꾼다
@@ -67,7 +117,8 @@ export function loadHistory(): LoadedHistory {
     raw = localStorage.getItem(HISTORY_KEY);
     legacyRaw = raw === null ? localStorage.getItem(LEGACY_HISTORY_KEY) : null;
     current = localStorage.getItem(CURRENT_KEY);
-  } catch {
+  } catch (e) {
+    logWarning("문의 내역을 읽지 못했다", e);
     return { conversations: [], currentId: null };
   }
 
@@ -97,6 +148,7 @@ export function saveHistory(conversations: Conversation[]): boolean {
       return true;
     } catch (e) {
       if (!isQuotaError(e) || keep.length <= 1) {
+        logWarning("문의 내역을 저장하지 못했다", e);
         return false;
       }
       keep = keep.slice(0, Math.floor(keep.length * SHRINK_RATIO));
@@ -112,8 +164,8 @@ export function saveCurrentId(id: string | null): void {
     } else {
       localStorage.removeItem(CURRENT_KEY);
     }
-  } catch {
-    // 저장이 안 되어도 화면은 동작한다
+  } catch (e) {
+    logWarning("마지막으로 보던 대화를 저장하지 못했다", e); // 화면은 그대로 동작한다
   }
 }
 
@@ -129,7 +181,8 @@ function readList(raw: string | null, version: number): unknown[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (e) {
+    logWarning("문의 내역 저장본이 깨져 있어 버린다", e);
     return [];
   }
   return isObject(parsed) && parsed.version === version && Array.isArray(parsed.conversations)
@@ -149,7 +202,7 @@ function conversationSchema(readers: MetaReaders): z.ZodType<Conversation> {
       classification: readers.classification,
       provider: z.enum(PROVIDERS).optional().catch(undefined),
       meta: readers.meta,
-      error: z.object({ code: z.string(), message: z.string() }).optional().catch(undefined),
+      error: answerErrorSchema.optional().catch(undefined),
       finishedAt: z.number().optional().catch(undefined),
       regenerated: z.boolean().optional().catch(undefined),
     })

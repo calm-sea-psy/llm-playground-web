@@ -10,6 +10,24 @@ import {
   MAX_CONVERSATIONS,
   saveHistory,
 } from "./history";
+import { createMockApiClient } from "../api/mockClient";
+import type { AnswerResponse } from "../api/types";
+
+const META: AnswerResponse = {
+  requestId: "req-1",
+  status: "ok",
+  label: "shipping",
+  answer: "답변",
+  provider: "local",
+  model: "gemma",
+  promptVersion: "v1",
+  toolsUsed: [{ name: "get_today", args: {}, ok: true, error: null, latencyMs: 3 }],
+  latencyMs: 1200,
+  usage: { inputTokens: 3, outputTokens: null },
+  error: null,
+  createdAt: "2026-10-13T00:00:00Z",
+  classification: null,
+};
 
 function conversation(
   id: string,
@@ -188,5 +206,56 @@ describe("history", () => {
     const [loaded] = loadHistory().conversations;
     expect(loaded.messages[1]).not.toHaveProperty("meta");
     expect(loaded.messages[1].content).toBe("답변");
+  });
+
+  // 예전 검사(requestId · label 문자열만 확인)를 통과해 렌더 중 예외로 이어지던 모양들
+  it.each([
+    ["model 이 문자열이 아님", { ...META, model: 1 }],
+    ["toolsUsed 가 배열이 아님", { ...META, toolsUsed: "없음" }],
+    ["usage 가 없음", { ...META, usage: undefined }],
+    ["툴 호출 latencyMs 가 없음", { ...META, toolsUsed: [{ name: "x", args: {}, ok: true }] }],
+    ["classification 이 label 만 있음", { ...META, classification: { label: "shipping" } }],
+  ])("v2 메타가 어긋나면 버린다: %s", (_name, meta) => {
+    const c = conversation("a", 1);
+    c.messages[1] = { ...c.messages[1], meta: meta as never };
+    localStorage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: [c] }));
+
+    const [loaded] = loadHistory().conversations;
+    expect(loaded.messages[1]).not.toHaveProperty("meta");
+    expect(loaded.messages[1].content).toBe("답변");
+  });
+
+  it("v2 classification 이 어긋나면 그것만 버린다", () => {
+    const c = conversation("a", 1);
+    c.messages[1] = {
+      ...c.messages[1],
+      meta: META,
+      classification: { label: "shipping" } as never,
+    };
+    localStorage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: [c] }));
+
+    const [loaded] = loadHistory().conversations;
+    expect(loaded.messages[1]).not.toHaveProperty("classification");
+    expect(loaded.messages[1].meta).toEqual(META);
+  });
+
+  it.each([
+    ["배송 문의 (분류 · 경로 포함)", "배송이 늦어요"],
+    ["범위 밖 문의 (툴 호출 포함)", "서울 날씨 어때요?"],
+    ["오류 응답", "배송 오류"],
+  ])("앱이 받은 응답은 저장했다 불러와도 그대로다: %s", async (_name, text) => {
+    const api = createMockApiClient({ stepMs: 0, deltaMs: 0, adventureMs: 0 });
+    const meta = await api.answerStream({ text, provider: "local" });
+    const c = conversation("a", 1);
+    c.messages[1] = {
+      ...c.messages[1],
+      meta,
+      ...(meta.classification && { classification: meta.classification }),
+    };
+    saveHistory([c]);
+
+    const [loaded] = loadHistory().conversations;
+    expect(loaded.messages[1].meta).toEqual(meta);
+    expect(loaded.messages[1].classification).toEqual(meta.classification);
   });
 });

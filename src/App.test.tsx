@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { THEME_KEY } from "./hooks/useTheme";
+import { CURRENT_KEY, HISTORY_KEY } from "./lib/history";
 import { fakeApiClient, providersWith } from "./test/fakeApi";
 
 /** matchMedia 흉내: 넓은 화면 여부 · OS 다크 설정을 바꿀 수 있다 */
@@ -93,6 +94,35 @@ describe("App", () => {
     renderApp();
     expect(screen.getByLabelText<HTMLSelectElement>("화면 테마").value).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("저장된 답변 메타가 어긋나도 화면이 깨지지 않고 답변은 보인다", () => {
+    stubMatchMedia({ desktop: true, systemDark: false });
+    const message = { status: "done", createdAt: 1, content: "저장된 답변" };
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify({
+        version: 2,
+        conversations: [
+          {
+            id: "a",
+            title: "문의",
+            createdAt: 1,
+            updatedAt: 1,
+            messages: [
+              { ...message, id: "u", role: "user" },
+              // 예전 검사를 통과하던 모양: model · toolsUsed · usage 를 읽다가 예외가 났다
+              { ...message, id: "m", role: "assistant", meta: { requestId: "req", model: 1 } },
+            ],
+          },
+        ],
+      }),
+    );
+    localStorage.setItem(CURRENT_KEY, "a");
+    renderApp();
+    expect(screen.getAllByText("저장된 답변").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("처리 과정 ▸")).toBeNull();
   });
 
   it("넓은 화면에는 햄버거 버튼이 없고 사이드바가 바로 보인다", () => {
