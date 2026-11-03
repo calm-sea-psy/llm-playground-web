@@ -48,7 +48,7 @@ export class SseParser {
   }
 }
 
-function parseBlock(block: string): SseMessage | null {
+function parseBlock(block: string): SseMessage | undefined {
   let event = "message";
   const data: string[] = [];
   for (const line of block.split("\n")) {
@@ -67,5 +67,5 @@ function parseBlock(block: string): SseMessage | null {
       data.push(value);
     }
   }
-  return data.length ? { event, data: data.join("\n") } : null;
+  return data.length ? { event, data: data.join("\n") } : undefined;
 }

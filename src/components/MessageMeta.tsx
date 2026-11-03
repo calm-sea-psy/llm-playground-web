@@ -24,13 +24,13 @@ interface MessageMetaProps {
 
 /** 답변 아래 배지 + "처리 과정" 펼침 (분류기 확률 · 경로 규칙 · LLM 검증 · 툴 호출 · 토큰) */
 export function MessageMeta({ meta, classification: early, totalMs }: MessageMetaProps) {
-  const classification = meta.classification ?? early ?? null;
-  const route = classification?.route ?? null;
-  const verification = classification?.verification ?? null;
+  const classification = meta.classification ?? early;
+  const route = classification?.route;
+  const verification = classification?.verification;
   const modelShort = meta.model.split("/").at(-1) ?? meta.model;
   const modelName = `${PROVIDER_NAMES[meta.provider]} · ${modelShort}`;
   // 범위 밖 문의는 라벨과 경로 이름이 같다 → 한 번만
-  const showRoute = route !== null && routeName(route.route) !== labelName(meta.label);
+  const showRoute = route && routeName(route.route) !== labelName(meta.label);
   // 툴 호출은 같은 툴이 여러 번 나올 수 있고 순서가 바뀌지 않아 순번을 키에 쓴다
   const tools = meta.toolsUsed.map((tool, i) => ({ key: `${tool.name}-${i}`, tool }));
 
@@ -112,7 +112,7 @@ export function MessageMeta({ meta, classification: early, totalMs }: MessageMet
               ["답변 생성", seconds(meta.latencyMs)],
               ...optionalRow(
                 "전체 (분류 · 검증 포함)",
-                totalMs === undefined ? null : seconds(totalMs),
+                totalMs === undefined ? undefined : seconds(totalMs),
               ),
               [
                 "토큰 (입력 / 출력)",
@@ -138,8 +138,8 @@ function percent(p: number): string {
 }
 
 /** 값이 있을 때만 한 줄 */
-function optionalRow(name: string, value: string | null): Row[] {
-  return value === null ? [] : [[name, value]];
+function optionalRow(name: string, value: string | null | undefined): Row[] {
+  return value == null ? [] : [[name, value]];
 }
 
 function Badge({

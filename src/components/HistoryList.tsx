@@ -8,9 +8,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface HistoryListProps {
   conversations: Conversation[];
-  currentId: string | null;
+  currentId: string | undefined;
   /** 받는 중인 대화 */
-  activeId: string | null;
+  activeId: string | undefined;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   /** 기준 시각 (테스트용). 없으면 현재 시각 */

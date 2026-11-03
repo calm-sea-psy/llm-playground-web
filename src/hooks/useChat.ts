@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { useApi } from "./useApi";
-import { useStorage } from "./useStorage";
+import { useChatHistory } from "./useChatHistory";
+import { useUndoDelete } from "./useUndoDelete";
 import { AnswerStreamError } from "../api/client";
 import type { AnswerError, AnswerResponse, Provider } from "../api/types";
 import {
@@ -12,24 +13,15 @@ import {
   type Conversation,
   type Message,
 } from "../lib/chat";
-import { loadHistory, saveCurrentId, saveHistory, type LoadedHistory } from "../lib/history";
+import type { LoadedHistory } from "../lib/history";
 import { logWarning } from "../lib/logger";
-
-/** 삭제 뒤 실행 취소를 받을 수 있는 시간 */
-export const UNDO_DELETE_MS = 5000;
 
 const EMPTY: Message[] = [];
 
 const UNKNOWN_ERROR: AnswerError = { code: "unknown", message: "알 수 없는 오류가 발생했습니다" };
 
-interface DeletedConversation {
-  conversation: Conversation;
-  /** 지우기 전 목록 위치 (실행 취소 때 같은 자리로) */
-  index: number;
-}
-
 interface UseChatOptions {
-  /** 답변 요청이 network 오류로 실패했을 때 */
+  /** 답변 요청이 network 오류로 실패했을 때. 받는 도중에 바뀌지 않게 고정된 함수를 넘긴다 */
   onNetworkError?: () => void;
 }
 
@@ -37,17 +29,17 @@ interface UseChatOptions {
 export interface UseChatResult {
   /** 문의를 한 번이라도 보낸 대화 (빈 새 문의는 넣지 않는다) */
   conversations: Conversation[];
-  /** 보고 있는 대화. null 이면 빈 새 문의 화면 */
-  currentId: string | null;
+  /** 보고 있는 대화. 없으면 빈 새 문의 화면 */
+  currentId: string | undefined;
   /** 보고 있는 대화의 메시지 (새 문의 화면이면 빈 배열) */
   messages: Message[];
-  /** 받는 중인 대화 id (null 이면 쉬는 중) */
-  activeId: string | null;
-  busy: boolean;
+  /** 받는 중인 대화 id (없으면 쉬는 중) */
+  activeId: string | undefined;
+  isBusy: boolean;
   /** 마지막 저장이 성공했는지 */
-  storageOk: boolean;
+  isStorageOk: boolean;
   /** 방금 지워서 실행 취소할 수 있는 대화 */
-  lastDeleted: Conversation | null;
+  lastDeleted: Conversation | undefined;
   /** 보고 있는 대화에 문의를 보낸다. 받는 중이거나 빈 문의면 false */
   send: (text: string, provider: Provider) => boolean;
   /** 오류 · 중지된 답변을 같은 자리에서 다시 받는다 */
@@ -67,60 +59,44 @@ export interface UseChatResult {
  * 문의 내역 전체와 전송 · 중지 · 다시 시도 · 대화 전환 · 삭제.
  * - API 는 문의를 하나씩 독립적으로 처리한다 (같은 대화에서 다시 보내도 이전 맥락 없음)
  * - 요청은 한 번에 하나. 받는 도중 다른 대화로 옮겨도 답변은 원래 대화에서 계속 받는다
- * - localStorage 에는 보낸 직후 · done · 오류 · 중지 · 삭제 때만 쓴다 (delta 마다 쓰지 않음)
+ * - 저장소에는 보낸 직후 · done · 오류 · 중지 · 삭제 때만 쓴다 (delta 마다 쓰지 않음)
  */
 export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult {
   const api = useApi();
-  const storage = useStorage();
-  const [history, setHistory] = useState<LoadedHistory>(() => loadHistory(storage));
-  const [storageOk, setStorageOk] = useState(true);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [lastDeleted, setLastDeleted] = useState<DeletedConversation | null>(null);
+  const { history, historyRef, isStorageOk, updateHistory } = useChatHistory();
+  const {
+    lastDeleted,
+    remove: removeConversation,
+    undoRemove,
+  } = useUndoDelete({ historyRef, updateHistory });
+  const [activeId, setActiveId] = useState<string>();
 
-  const controllerRef = useRef<AbortController | null>(null);
-  const historyRef = useRef(history);
-  /** 다음 커밋 뒤에 저장할지 (delta 같은 잦은 갱신은 저장하지 않는다) */
-  const shouldSaveRef = useRef(false);
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const onNetworkErrorRef = useRef(onNetworkError);
-
-  useEffect(() => {
-    onNetworkErrorRef.current = onNetworkError;
-  }, [onNetworkError]);
-
-  useEffect(() => {
-    historyRef.current = history;
-    if (shouldSaveRef.current) {
-      shouldSaveRef.current = false;
-      setStorageOk(saveHistory(storage, history.conversations));
-    }
-  }, [storage, history]);
-
-  useEffect(() => {
-    saveCurrentId(storage, history.currentId);
-  }, [storage, history.currentId]);
-
-  // 정리할 때 받던 요청을 중지하지 않는다: 개발 모드 StrictMode 는 이펙트를 한 번 더 정리 · 실행하는데,
+  // 언마운트 때 받던 요청을 중지하지 않는다: 개발 모드 StrictMode 는 이펙트를 한 번 더 정리 · 실행하는데,
   // 첫 이펙트 처리가 늦으면(숨겨진 탭에서 막 열었을 때 등) 그사이 시작된 요청이 중지되었다.
   // 앱은 페이지를 닫을 때만 사라지고, 그때는 브라우저가 요청을 끊는다.
-  useEffect(() => () => clearTimeout(undoTimerRef.current), []);
+  const controllerRef = useRef<AbortController>(undefined);
 
-  /** 메시지 하나만 바꾼다 (나머지 메시지 객체는 그대로 → memo 된 컴포넌트는 다시 그리지 않는다). save 면 커밋 뒤 저장 */
+  /** 메시지 하나만 바꾼다 (나머지 메시지 객체는 그대로 → memo 된 컴포넌트는 다시 그리지 않는다) */
   const updateMessage = useCallback(
-    (conversationId: string, messageId: string, change: (m: Message) => Message, save = false) => {
-      if (save) {
-        shouldSaveRef.current = true;
-      }
-      setHistory((h) => ({
-        ...h,
-        conversations: h.conversations.map((c) =>
-          c.id === conversationId
-            ? { ...c, messages: c.messages.map((m) => (m.id === messageId ? change(m) : m)) }
-            : c,
-        ),
-      }));
+    (
+      conversationId: string,
+      messageId: string,
+      change: (m: Message) => Message,
+      shouldSave = false,
+    ) => {
+      updateHistory(
+        (h) => ({
+          ...h,
+          conversations: h.conversations.map((c) =>
+            c.id === conversationId
+              ? { ...c, messages: c.messages.map((m) => (m.id === messageId ? change(m) : m)) }
+              : c,
+          ),
+        }),
+        shouldSave,
+      );
     },
-    [],
+    [updateHistory],
   );
 
   /** 대화의 assistantId 메시지에 text 의 답변을 받아 채운다 */
@@ -129,8 +105,8 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
       const controller = new AbortController();
       controllerRef.current = controller;
       setActiveId(conversationId);
-      const update = (change: (m: Message) => Message, save = false): void => {
-        updateMessage(conversationId, assistantId, change, save);
+      const update = (change: (m: Message) => Message, shouldSave = false): void => {
+        updateMessage(conversationId, assistantId, change, shouldSave);
       };
       try {
         const res = await api.answerStream(
@@ -151,21 +127,21 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
           const error = toAnswerError(e);
           update((m) => ({ ...m, status: "error", error, finishedAt: Date.now() }), true);
           if (error.code === "network") {
-            onNetworkErrorRef.current?.();
+            onNetworkError?.();
           }
         }
       } finally {
         if (controllerRef.current === controller) {
-          controllerRef.current = null;
-          setActiveId(null);
+          controllerRef.current = undefined;
+          setActiveId(undefined);
         }
       }
     },
-    [api, updateMessage],
+    [api, updateMessage, onNetworkError],
   );
 
   const sendMessage = useCallback(
-    (text: string, provider: Provider, regenerated: boolean): boolean => {
+    (text: string, provider: Provider, isRegenerated: boolean): boolean => {
       const trimmed = text.trim();
       if (!trimmed || controllerRef.current) {
         return false;
@@ -177,7 +153,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         content: trimmed,
         status: "done",
         createdAt: now,
-        ...(regenerated && { regenerated: true }),
+        ...(isRegenerated && { regenerated: true }),
       };
       const assistant: Message = {
         id: newId(),
@@ -196,17 +172,20 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         updatedAt: now,
         messages: [...base.messages, user, assistant],
       };
-      shouldSaveRef.current = true; // 답변 도중 탭이 닫혀도 문의는 남도록
-      setHistory((h) => ({
-        currentId: conversation.id,
-        conversations: existing
-          ? h.conversations.map((c) => (c.id === conversation.id ? conversation : c))
-          : [conversation, ...h.conversations],
-      }));
+      // 답변 도중 탭이 닫혀도 문의는 남도록 바로 저장한다
+      updateHistory(
+        (h) => ({
+          currentId: conversation.id,
+          conversations: existing
+            ? h.conversations.map((c) => (c.id === conversation.id ? conversation : c))
+            : [conversation, ...h.conversations],
+        }),
+        true,
+      );
       void run(conversation.id, assistant.id, trimmed, provider);
       return true;
     },
-    [run],
+    [historyRef, run, updateHistory],
   );
 
   const send = useCallback(
@@ -235,7 +214,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
       }));
       void run(conversation.id, assistantId, target.question, target.provider);
     },
-    [run, updateMessage],
+    [historyRef, run, updateMessage],
   );
 
   const regenerate = useCallback(
@@ -244,63 +223,38 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
       const target = conversation && resendTargetOf(conversation.messages, assistantId);
       return target ? sendMessage(target.question, target.provider, true) : false;
     },
-    [sendMessage],
+    [historyRef, sendMessage],
   );
 
   const stop = useCallback(() => controllerRef.current?.abort(), []);
 
-  const newChat = useCallback(() => setHistory((h) => ({ ...h, currentId: null })), []);
+  const newChat = useCallback(
+    () => updateHistory((h) => ({ ...h, currentId: undefined })),
+    [updateHistory],
+  );
 
-  const select = useCallback((id: string) => setHistory((h) => ({ ...h, currentId: id })), []);
+  const select = useCallback(
+    (id: string) => updateHistory((h) => ({ ...h, currentId: id })),
+    [updateHistory],
+  );
 
   const remove = useCallback(
     (id: string) => {
-      if (id === activeId) {
-        return;
+      if (id !== activeId) {
+        removeConversation(id);
       }
-      const index = historyRef.current.conversations.findIndex((c) => c.id === id);
-      if (index === -1) {
-        return;
-      }
-      const conversation = historyRef.current.conversations[index];
-      shouldSaveRef.current = true;
-      setHistory((h) => ({
-        currentId: h.currentId === id ? null : h.currentId,
-        conversations: h.conversations.filter((c) => c.id !== id),
-      }));
-      setLastDeleted({ conversation, index });
-      clearTimeout(undoTimerRef.current);
-      undoTimerRef.current = setTimeout(() => setLastDeleted(null), UNDO_DELETE_MS);
     },
-    [activeId],
+    [activeId, removeConversation],
   );
-
-  const undoRemove = useCallback(() => {
-    if (!lastDeleted) {
-      return;
-    }
-    const { conversation, index } = lastDeleted;
-    shouldSaveRef.current = true;
-    setHistory((h) => {
-      if (h.conversations.some((c) => c.id === conversation.id)) {
-        return h;
-      }
-      const conversations = [...h.conversations];
-      conversations.splice(Math.min(index, conversations.length), 0, conversation);
-      return { ...h, conversations };
-    });
-    setLastDeleted(null);
-    clearTimeout(undoTimerRef.current);
-  }, [lastDeleted]);
 
   return {
     conversations: history.conversations,
     currentId: history.currentId,
     messages: currentConversation(history)?.messages ?? EMPTY,
     activeId,
-    busy: activeId !== null,
-    storageOk,
-    lastDeleted: lastDeleted?.conversation ?? null,
+    isBusy: activeId !== undefined,
+    isStorageOk,
+    lastDeleted,
     send,
     retry,
     regenerate,
@@ -312,8 +266,11 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
   };
 }
 
-function currentConversation({ conversations, currentId }: LoadedHistory): Conversation | null {
-  return conversations.find((c) => c.id === currentId) ?? null;
+function currentConversation({
+  conversations,
+  currentId,
+}: LoadedHistory): Conversation | undefined {
+  return conversations.find((c) => c.id === currentId);
 }
 
 /** done 응답으로 답변을 마무리한다 */

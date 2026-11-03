@@ -78,7 +78,7 @@ describe("history", () => {
   });
 
   it("저장본이 없거나 깨졌거나 버전이 다르면 빈 내역", () => {
-    expect(loadHistory(storage)).toEqual({ conversations: [], currentId: null });
+    expect(loadHistory(storage)).toEqual({ conversations: [], currentId: undefined });
     localStorage.setItem(HISTORY_KEY, "{깨짐");
     expect(loadHistory(storage).conversations).toEqual([]);
     localStorage.setItem(
@@ -103,7 +103,7 @@ describe("history", () => {
   it("없는 대화를 마지막으로 보던 대화로 가리키면 새 문의 화면", () => {
     saveHistory(storage, [conversation("a", 1)]);
     localStorage.setItem(CURRENT_KEY, "지워진-대화");
-    expect(loadHistory(storage).currentId).toBeNull();
+    expect(loadHistory(storage).currentId).toBeUndefined();
   });
 
   it("pending · streaming으로 남은 답변은 stopped로 불러온다", () => {
@@ -159,7 +159,7 @@ describe("history", () => {
       throw new DOMException("denied", "SecurityError");
     });
     expect(saveHistory(storage, [conversation("a", 1)])).toBe(false);
-    expect(loadHistory(storage)).toEqual({ conversations: [], currentId: null });
+    expect(loadHistory(storage)).toEqual({ conversations: [], currentId: undefined });
   });
 
   it("v1 저장본은 답변 메타를 화면 형식으로 바꿔 불러오고, 다음 저장 때 v1 을 지운다", () => {

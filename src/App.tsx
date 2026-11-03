@@ -36,14 +36,14 @@ export function App() {
   const { message: announcement, announce } = useAnnouncer();
   const [draft, setDraft] = useState("");
   /** 사용자가 고르기 전에는 서버 기본값(defaultProvider)을 따른다 */
-  const [chosenProvider, setChosenProvider] = useState<Provider | null>(null);
+  const [chosenProvider, setChosenProvider] = useState<Provider>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const serverDefault = "health" in health ? health.health.defaultProvider : null;
+  const serverDefault = "health" in health ? health.health.defaultProvider : undefined;
   const provider = chosenProvider ?? serverDefault ?? FALLBACK_PROVIDER;
   // 요청은 한 번에 하나: 보고 있는 대화가 받는 중이면 중지 버튼, 다른 대화가 받는 중이면 전송을 막는다
-  const isBusyHere = chat.busy && chat.activeId === chat.currentId;
-  const isBusyElsewhere = chat.busy && !isBusyHere;
+  const isBusyHere = chat.isBusy && chat.activeId === chat.currentId;
+  const isBusyElsewhere = chat.isBusy && !isBusyHere;
 
   function handleNewChat(): void {
     chat.newChat();
@@ -97,7 +97,7 @@ export function App() {
           onRemove={chat.remove}
           lastDeleted={chat.lastDeleted}
           onUndoRemove={chat.undoRemove}
-          isStorageOk={chat.storageOk}
+          isStorageOk={chat.isStorageOk}
         />
       </div>
 
@@ -116,7 +116,7 @@ export function App() {
               ☰
             </button>
           ) : null}
-          <ProviderSelect value={provider} onChange={setChosenProvider} disabled={chat.busy} />
+          <ProviderSelect value={provider} onChange={setChosenProvider} disabled={chat.isBusy} />
           <div className="ml-auto">
             <ThemeSelect value={theme} onChange={setTheme} />
           </div>
@@ -128,7 +128,7 @@ export function App() {
         >
           <ChatView
             messages={chat.messages}
-            isBusy={chat.busy}
+            isBusy={chat.isBusy}
             onRetry={chat.retry}
             onRegenerate={chat.regenerate}
             onAnnounce={announce}

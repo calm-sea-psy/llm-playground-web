@@ -28,8 +28,8 @@ function setup(props: Partial<Parameters<typeof HistoryList>[0]> = {}) {
   render(
     <HistoryList
       conversations={LIST}
-      currentId={null}
-      activeId={null}
+      currentId={undefined}
+      activeId={undefined}
       onSelect={onSelect}
       onRemove={onRemove}
       now={NOW}

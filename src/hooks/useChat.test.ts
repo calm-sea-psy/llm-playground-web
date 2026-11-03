@@ -2,7 +2,8 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { UNDO_DELETE_MS, useChat } from "./useChat";
+import { useChat } from "./useChat";
+import { UNDO_DELETE_MS } from "./useUndoDelete";
 import { AnswerStreamError, type ApiClient, type AnswerStreamHandlers } from "../api/client";
 import type { AnswerRequest, AnswerResponse } from "../api/types";
 import { CURRENT_KEY, HISTORY_KEY } from "../lib/history";
@@ -88,7 +89,7 @@ describe("useChat", () => {
   it("새 문의 화면에서 보내면 대화를 만들고 pending → streaming → done", async () => {
     const stream = controllableStream();
     const { result } = renderHook(() => useChat(), { wrapper });
-    expect(result.current.currentId).toBeNull();
+    expect(result.current.currentId).toBeUndefined();
     expect(result.current.messages).toEqual([]);
 
     act(() => {
@@ -126,7 +127,7 @@ describe("useChat", () => {
       content: done.answer,
       meta: done,
     });
-    expect(result.current.busy).toBe(false);
+    expect(result.current.isBusy).toBe(false);
   });
 
   it("같은 대화에서 다시 보내면 메시지가 이어 붙는다 (독립 문의)", async () => {
@@ -175,7 +176,7 @@ describe("useChat", () => {
     });
 
     await act(async () => result.current.stop());
-    await waitFor(() => expect(result.current.busy).toBe(false));
+    await waitFor(() => expect(result.current.isBusy).toBe(false));
     expect(result.current.messages[1]).toMatchObject({ status: "stopped", content: "받은 데까지" });
     expect(stored()?.conversations[0].messages[1]).toMatchObject({
       status: "stopped",
@@ -267,7 +268,7 @@ describe("useChat", () => {
     act(() => {
       result.current.newChat();
     });
-    expect(result.current.currentId).toBeNull();
+    expect(result.current.currentId).toBeUndefined();
     expect(result.current.messages).toEqual([]);
     expect(result.current.activeId).toBe(a);
 
@@ -282,8 +283,8 @@ describe("useChat", () => {
       first.handlers.onDelta?.("계속 ");
     });
     await first.resolve(response({ answer: "계속 받은 답변" }));
-    expect(result.current.activeId).toBeNull();
-    expect(result.current.currentId).toBeNull();
+    expect(result.current.activeId).toBeUndefined();
+    expect(result.current.currentId).toBeUndefined();
     const conversation = result.current.conversations.find((c) => c.id === a)!;
     expect(conversation.messages[1]).toMatchObject({ status: "done", content: "계속 받은 답변" });
 
@@ -311,7 +312,7 @@ describe("useChat", () => {
     const second = renderHook(() => useChat(), { wrapper });
     expect(second.result.current.currentId).toBe(id);
     expect(second.result.current.messages[1]).toMatchObject({ status: "stopped" });
-    expect(second.result.current.busy).toBe(false);
+    expect(second.result.current.isBusy).toBe(false);
   });
 
   it("삭제하면 목록에서 빠지고, 실행 취소하면 같은 자리로 돌아온다", async () => {
@@ -336,7 +337,7 @@ describe("useChat", () => {
       result.current.remove(ids[1]);
     });
     expect(result.current.conversations.map((c) => c.id)).toEqual([ids[0], ids[2]]);
-    expect(result.current.currentId).toBeNull(); // 보던 대화를 지우면 새 문의 화면
+    expect(result.current.currentId).toBeUndefined(); // 보던 대화를 지우면 새 문의 화면
     expect(result.current.lastDeleted?.id).toBe(ids[1]);
     expect(stored()?.conversations).toHaveLength(2);
 
@@ -344,7 +345,7 @@ describe("useChat", () => {
       result.current.undoRemove();
     });
     expect(result.current.conversations.map((c) => c.id)).toEqual(ids);
-    expect(result.current.lastDeleted).toBeNull();
+    expect(result.current.lastDeleted).toBeUndefined();
     expect(stored()?.conversations).toHaveLength(3);
 
     act(() => {
@@ -353,7 +354,7 @@ describe("useChat", () => {
     act(() => {
       vi.advanceTimersByTime(UNDO_DELETE_MS);
     });
-    expect(result.current.lastDeleted).toBeNull();
+    expect(result.current.lastDeleted).toBeUndefined();
   });
 
   it("받는 중인 대화는 지울 수 없다", () => {
@@ -368,7 +369,7 @@ describe("useChat", () => {
     expect(result.current.conversations).toHaveLength(1);
   });
 
-  it("localStorage를 쓸 수 없어도 동작하고 storageOk=false", async () => {
+  it("localStorage를 쓸 수 없어도 동작하고 isStorageOk=false", async () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("denied", "SecurityError");
     });
@@ -377,7 +378,7 @@ describe("useChat", () => {
     act(() => {
       result.current.send("배송이 늦어요", "local");
     });
-    expect(result.current.storageOk).toBe(false);
+    expect(result.current.isStorageOk).toBe(false);
     await stream.resolve(response());
     expect(result.current.messages[1].status).toBe("done");
   });

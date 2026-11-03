@@ -10,7 +10,7 @@ interface ErrorMessageProps {
 /** 오류 안내: 코드별 안내 문장 + 서버 원문(작게) + 다시 시도 (다시 보내도 같은 결과인 입력 오류는 버튼 없음) */
 export function ErrorMessage({ error, onRetry, isRetryDisabled = false }: ErrorMessageProps) {
   const guide = errorGuide(error.code);
-  const detail = error.message && error.message !== guide.text ? error.message : null;
+  const detail = error.message && error.message !== guide.text ? error.message : undefined;
 
   return (
     <div
@@ -25,7 +25,7 @@ export function ErrorMessage({ error, onRetry, isRetryDisabled = false }: ErrorM
           </p>
         ) : null}
       </div>
-      {onRetry && guide.retry ? (
+      {onRetry && guide.canRetry ? (
         <button
           type="button"
           onClick={onRetry}

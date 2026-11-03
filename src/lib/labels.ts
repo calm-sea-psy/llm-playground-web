@@ -13,7 +13,7 @@ export type Theme = (typeof THEMES)[number];
 export interface ErrorGuide {
   text: string;
   /** false 면 다시 보내도 같은 결과라 다시 시도 버튼을 숨긴다 */
-  retry: boolean;
+  canRetry: boolean;
 }
 
 /** 답변 모델 제공자 표시 이름 */
@@ -71,19 +71,22 @@ const TOOL_NAMES: Partial<Record<string, string>> = {
  * aborted 는 오류가 아니라 중지(stopped)로 그려서 안내가 없다.
  */
 const ERROR_GUIDES: Partial<Record<string, ErrorGuide>> = {
-  config_error: { text: "서버 설정을 확인하세요 (분류 모델이나 API 키가 없습니다).", retry: true },
-  llm_error: { text: "모델 서버(Ollama)가 꺼져 있을 수 있습니다.", retry: true },
-  llm_timeout: { text: "응답 시간이 초과되었습니다.", retry: true },
+  config_error: {
+    text: "서버 설정을 확인하세요 (분류 모델이나 API 키가 없습니다).",
+    canRetry: true,
+  },
+  llm_error: { text: "모델 서버(Ollama)가 꺼져 있을 수 있습니다.", canRetry: true },
+  llm_timeout: { text: "응답 시간이 초과되었습니다.", canRetry: true },
   invalid_input: {
     text: "문의 내용을 확인하세요 (빈 문장이거나 2000자를 넘었습니다).",
-    retry: false,
+    canRetry: false,
   },
-  network: { text: "API 서버에 연결할 수 없습니다.", retry: true },
-  incomplete: { text: "답변을 끝까지 받지 못했습니다 (연결이 끊겼습니다).", retry: true },
-  bad_response: { text: "서버 응답 형식이 올바르지 않습니다.", retry: true },
+  network: { text: "API 서버에 연결할 수 없습니다.", canRetry: true },
+  incomplete: { text: "답변을 끝까지 받지 못했습니다 (연결이 끊겼습니다).", canRetry: true },
+  bad_response: { text: "서버 응답 형식이 올바르지 않습니다.", canRetry: true },
 } satisfies Record<ErrorCode | Exclude<AnswerStreamErrorCode, "aborted">, ErrorGuide>;
 
-const UNKNOWN_ERROR_GUIDE: ErrorGuide = { text: "알 수 없는 오류가 발생했습니다.", retry: true };
+const UNKNOWN_ERROR_GUIDE: ErrorGuide = { text: "알 수 없는 오류가 발생했습니다.", canRetry: true };
 
 /** 분류 라벨 표시 이름. 모르는 라벨은 그대로 */
 export function labelName(label: string): string {

@@ -96,14 +96,14 @@ export interface ResendTarget {
 /**
  * 답변 하나를 다시 받을 때 보낼 문의(그 답변 바로 앞의 유저 메시지)와 모델.
  *
- * @returns 답변을 찾지 못했거나 앞에 문의가 없거나 모델 기록이 없으면 null
+ * @returns 답변을 찾지 못했거나 앞에 문의가 없거나 모델 기록이 없으면 undefined
  */
-export function resendTargetOf(messages: Message[], assistantId: string): ResendTarget | null {
+export function resendTargetOf(messages: Message[], assistantId: string): ResendTarget | undefined {
   const index = messages.findIndex((m) => m.id === assistantId);
   if (index === -1) {
-    return null;
+    return undefined;
   }
   const question = messages.slice(0, index).findLast((m) => m.role === "user");
   const { provider } = messages[index];
-  return question && provider ? { question: question.content, provider } : null;
+  return question && provider ? { question: question.content, provider } : undefined;
 }

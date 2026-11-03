@@ -37,8 +37,8 @@ const SHRINK_RATIO = 0.8;
 /** 불러온 내역 */
 export interface LoadedHistory {
   conversations: Conversation[];
-  /** 마지막으로 보던 대화. 없거나 지워졌으면 null */
-  currentId: string | null;
+  /** 마지막으로 보던 대화. 없거나 지워졌으면 undefined */
+  currentId: string | undefined;
 }
 
 /** 저장본 버전마다 메타를 읽는 방법 */
@@ -120,7 +120,7 @@ export function loadHistory(storage: KeyValueStorage): LoadedHistory {
     current = storage.getItem(CURRENT_KEY);
   } catch (e) {
     logWarning("문의 내역을 읽지 못했다", e);
-    return { conversations: [], currentId: null };
+    return { conversations: [], currentId: undefined };
   }
 
   const list = raw === null ? readList(legacyRaw, 1) : readList(raw, 2);
@@ -131,7 +131,7 @@ export function loadHistory(storage: KeyValueStorage): LoadedHistory {
       return parsed.success ? [parsed.data] : [];
     }),
   );
-  const currentId = conversations.some((c) => c.id === current) ? current : null;
+  const currentId = conversations.find((c) => c.id === current)?.id;
   return { conversations, currentId };
 }
 
@@ -157,8 +157,8 @@ export function saveHistory(storage: KeyValueStorage, conversations: Conversatio
   }
 }
 
-/** 마지막으로 보던 대화를 남긴다 (새로고침하면 다시 연다). null 이면 새 문의 화면 */
-export function saveCurrentId(storage: KeyValueStorage, id: string | null): void {
+/** 마지막으로 보던 대화를 남긴다 (새로고침하면 다시 연다). 없으면 새 문의 화면 */
+export function saveCurrentId(storage: KeyValueStorage, id: string | undefined): void {
   try {
     if (id) {
       storage.setItem(CURRENT_KEY, id);

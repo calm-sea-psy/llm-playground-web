@@ -13,23 +13,23 @@ export function closeOpenMarkdown(typed: string): string {
   // 코드 블록 기호(```)를 두 글자까지만 타이핑한 상태: ``는 빈 코드로 처리되어 글자로 보인다 → 지운다
   const text = /(^|[^`])``$/.test(typed) ? typed.slice(0, -2) : typed;
   const lines = text.split("\n");
-  let fence: string | null = null;
+  let fence: string | undefined;
   const outside: string[] = []; // 코드 블록 밖의 줄
   for (const line of lines) {
     const match = FENCE.exec(line);
     if (match) {
-      if (fence === null) {
+      if (fence === undefined) {
         fence = match[1];
       } else if (match[1] === fence) {
-        fence = null;
+        fence = undefined;
       }
       continue;
     }
-    if (fence === null) {
+    if (fence === undefined) {
       outside.push(line);
     }
   }
-  if (fence !== null) {
+  if (fence !== undefined) {
     return `${text}\n${fence}`;
   }
 
@@ -161,6 +161,7 @@ export function toPlainText(root: HTMLElement): string {
 
 /** 렌더링된 답변을 붙여 넣기용 HTML로 (class · data-copy-ignore 요소 제거) */
 export function toCopyHtml(root: HTMLElement): string {
+  // cloneNode 의 타입은 Node 지만 HTMLElement 를 복제하면 HTMLElement 다
   const clone = root.cloneNode(true) as HTMLElement;
   clone.querySelectorAll("[data-copy-ignore]").forEach((el) => el.remove());
   clone.querySelectorAll("[class]").forEach((el) => el.removeAttribute("class"));
