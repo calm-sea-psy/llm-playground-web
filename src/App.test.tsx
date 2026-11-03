@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { THEME_KEY } from "./hooks/useTheme";
 import { CURRENT_KEY, HISTORY_KEY } from "./lib/history";
-import { fakeApiClient, providersWith } from "./test/fakeApi";
+import { fakeApiClient } from "./test/fakeApi";
+import { providersWith } from "./test/providersWith";
 
 /** matchMedia 흉내: 넓은 화면 여부 · OS 다크 설정을 바꿀 수 있다 */
 function stubMatchMedia({ desktop, systemDark }: { desktop: boolean; systemDark: boolean }) {

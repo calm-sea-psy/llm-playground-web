@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useApi } from "./useApi";
+import { useStorage } from "./useStorage";
 import { AnswerStreamError } from "../api/client";
 import type { AnswerError, AnswerResponse, Provider } from "../api/types";
 import {
@@ -70,7 +71,8 @@ export interface UseChatResult {
  */
 export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult {
   const api = useApi();
-  const [history, setHistory] = useState<LoadedHistory>(loadHistory);
+  const storage = useStorage();
+  const [history, setHistory] = useState<LoadedHistory>(() => loadHistory(storage));
   const [storageOk, setStorageOk] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [lastDeleted, setLastDeleted] = useState<DeletedConversation | null>(null);
@@ -90,13 +92,13 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
     historyRef.current = history;
     if (shouldSaveRef.current) {
       shouldSaveRef.current = false;
-      setStorageOk(saveHistory(history.conversations));
+      setStorageOk(saveHistory(storage, history.conversations));
     }
-  }, [history]);
+  }, [storage, history]);
 
   useEffect(() => {
-    saveCurrentId(history.currentId);
-  }, [history.currentId]);
+    saveCurrentId(storage, history.currentId);
+  }, [storage, history.currentId]);
 
   // 정리할 때 받던 요청을 중지하지 않는다: 개발 모드 StrictMode 는 이펙트를 한 번 더 정리 · 실행하는데,
   // 첫 이펙트 처리가 늦으면(숨겨진 탭에서 막 열었을 때 등) 그사이 시작된 요청이 중지되었다.

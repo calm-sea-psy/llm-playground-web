@@ -1,4 +1,4 @@
-// 문의 내역 저장 (localStorage). 저장 API 가 없어 브라우저에만 남는다.
+// 문의 내역 저장 (브라우저 저장소). 저장 API 가 없어 브라우저에만 남는다.
 // 모든 읽기 · 쓰기는 try/catch — 저장이 안 되는 환경(시크릿 창 · 차단 · 용량 초과)에서도 화면은 동작한다.
 //
 // 저장 형식
@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { MESSAGE_ROLES, MESSAGE_STATUSES, type Conversation, type Message } from "./chat";
 import { logWarning } from "./logger";
+import type { KeyValueStorage } from "./storage";
 import { answerResponseSchema, routingResultSchema } from "../api/schemas";
 import {
   ANSWER_STATUSES,
@@ -109,14 +110,14 @@ const V1_READERS: MetaReaders = {
  * 저장된 내역을 불러온다. 깨진 대화는 버리고 나머지는 살린다.
  * 저장 도중 탭이 닫혀 pending · streaming 으로 남은 답변은 stopped 로 바꾼다.
  */
-export function loadHistory(): LoadedHistory {
+export function loadHistory(storage: KeyValueStorage): LoadedHistory {
   let raw: string | null;
   let legacyRaw: string | null;
   let current: string | null;
   try {
-    raw = localStorage.getItem(HISTORY_KEY);
-    legacyRaw = raw === null ? localStorage.getItem(LEGACY_HISTORY_KEY) : null;
-    current = localStorage.getItem(CURRENT_KEY);
+    raw = storage.getItem(HISTORY_KEY);
+    legacyRaw = raw === null ? storage.getItem(LEGACY_HISTORY_KEY) : null;
+    current = storage.getItem(CURRENT_KEY);
   } catch (e) {
     logWarning("문의 내역을 읽지 못했다", e);
     return { conversations: [], currentId: null };
@@ -139,12 +140,12 @@ export function loadHistory(): LoadedHistory {
  *
  * @returns 저장했으면 true (일부를 줄였어도 true), 저장할 수 없으면 false
  */
-export function saveHistory(conversations: Conversation[]): boolean {
+export function saveHistory(storage: KeyValueStorage, conversations: Conversation[]): boolean {
   let keep = sortByRecent(conversations).slice(0, MAX_CONVERSATIONS);
   for (;;) {
     try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: keep }));
-      localStorage.removeItem(LEGACY_HISTORY_KEY);
+      storage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: keep }));
+      storage.removeItem(LEGACY_HISTORY_KEY);
       return true;
     } catch (e) {
       if (!isQuotaError(e) || keep.length <= 1) {
@@ -157,12 +158,12 @@ export function saveHistory(conversations: Conversation[]): boolean {
 }
 
 /** 마지막으로 보던 대화를 남긴다 (새로고침하면 다시 연다). null 이면 새 문의 화면 */
-export function saveCurrentId(id: string | null): void {
+export function saveCurrentId(storage: KeyValueStorage, id: string | null): void {
   try {
     if (id) {
-      localStorage.setItem(CURRENT_KEY, id);
+      storage.setItem(CURRENT_KEY, id);
     } else {
-      localStorage.removeItem(CURRENT_KEY);
+      storage.removeItem(CURRENT_KEY);
     }
   } catch (e) {
     logWarning("마지막으로 보던 대화를 저장하지 못했다", e); // 화면은 그대로 동작한다

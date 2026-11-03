@@ -6,7 +6,8 @@ import { UNDO_DELETE_MS, useChat } from "./useChat";
 import { AnswerStreamError, type ApiClient, type AnswerStreamHandlers } from "../api/client";
 import type { AnswerRequest, AnswerResponse } from "../api/types";
 import { CURRENT_KEY, HISTORY_KEY } from "../lib/history";
-import { fakeApiClient, providersWith } from "../test/fakeApi";
+import { fakeApiClient } from "../test/fakeApi";
+import { providersWith } from "../test/providersWith";
 
 const mockedStream = vi.fn<ApiClient["answerStream"]>();
 const wrapper = providersWith(fakeApiClient({ answerStream: mockedStream }));
@@ -223,6 +224,8 @@ describe("useChat", () => {
       content: "",
     });
     expect(result.current.messages[1].error).toBeUndefined();
+    // 화면이 이 값으로 메시지를 새로 만든다. 같은 ms 에 다시 받아도 반드시 커진다
+    expect(result.current.messages[1].createdAt).toBeGreaterThan(failed.createdAt);
 
     await second.resolve(response());
     expect(result.current.messages[1].status).toBe("done");

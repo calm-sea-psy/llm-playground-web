@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 
 import { useMediaQuery } from "./useMediaQuery";
+import { useStorage } from "./useStorage";
 import { THEMES, type Theme } from "../lib/labels";
 import { logWarning } from "../lib/logger";
+import type { KeyValueStorage } from "../lib/storage";
 
 /** 고른 테마 저장 키. index.html 의 인라인 스크립트도 같은 키를 읽는다 */
 export const THEME_KEY = "seal-frontend:theme";
@@ -19,7 +21,8 @@ export interface UseThemeResult {
  * (처음 그리기 전에는 index.html 스크립트가 같은 규칙으로 붙인다)
  */
 export function useTheme(): UseThemeResult {
-  const [theme, setTheme] = useState<Theme>(readTheme);
+  const storage = useStorage();
+  const [theme, setTheme] = useState<Theme>(() => readTheme(storage));
   const prefersDark = useMediaQuery("(prefers-color-scheme: dark)", false);
   const isDark = theme === "dark" || (theme === "system" && prefersDark);
 
@@ -33,9 +36,9 @@ export function useTheme(): UseThemeResult {
     setTheme(next);
     try {
       if (next === "system") {
-        localStorage.removeItem(THEME_KEY);
+        storage.removeItem(THEME_KEY);
       } else {
-        localStorage.setItem(THEME_KEY, next);
+        storage.setItem(THEME_KEY, next);
       }
     } catch (e) {
       logWarning("테마를 저장하지 못했다", e); // 지금 화면에는 적용된다
@@ -45,9 +48,9 @@ export function useTheme(): UseThemeResult {
   return { theme, setTheme: selectTheme };
 }
 
-function readTheme(): Theme {
+function readTheme(storage: KeyValueStorage): Theme {
   try {
-    const value = localStorage.getItem(THEME_KEY);
+    const value = storage.getItem(THEME_KEY);
     return THEMES.find((t) => t !== "system" && t === value) ?? "system";
   } catch (e) {
     logWarning("저장된 테마를 읽지 못했다", e);
