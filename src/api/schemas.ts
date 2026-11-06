@@ -1,127 +1,113 @@
-// 서버 응답(snake_case) 검증 · 변환. 서버 형식이 바뀌면 이 파일만 고친다.
-// 원본: Seal_LLM src/theseal/api/schemas.py (origin/main 기준)
+// 서버 형식(snake_case) 검증 · 변환. 서버 형식이 바뀌면 이 파일만 고친다.
+// 원본 계약: packages/common/src/common/{types,api}.py — 필드 · 기본값 · 불변식을 그대로 옮겼다.
 
 import { z } from "zod";
 
 import {
   ANSWER_STATUSES,
-  LABELS,
-  PROVIDERS,
-  ROUTES,
-  STATUS_STAGES,
-  VERIFY_MODES,
-  type AnswerResponse,
-  type Health,
-  type RoutingResult,
-  type StatusEvent,
+  ERROR_CODES,
+  RETRIEVAL_MODES,
+  type HealthResponse,
+  type QueryRequest,
+  type QueryResponse,
+  type RetrievalMode,
 } from "./types";
+
+/** POST /query 요청 본문 (서버 형식) */
+export interface QueryBody {
+  question: string;
+  retrieval_mode: RetrievalMode;
+  session_id: string;
+}
 
 /** GET /health */
 export const healthSchema = z
   .object({
-    classifier: z.string().nullable(),
-    classifier_device: z.string().nullable(),
-    classifier_error: z.string().nullable(),
-    route_rule_enabled: z.boolean(),
-    verify_mode: z.enum(VERIFY_MODES),
-    default_provider: z.enum(PROVIDERS),
+    status: z.literal("ok").default("ok"),
+    index_ready: z.boolean(),
+    index_name: z.string().nullish(),
+    embedder_id: z.string().nullish(),
+    supported_modes: z.array(z.enum(RETRIEVAL_MODES)).default([]),
   })
-  .transform((raw): Health => ({
-    classifier: raw.classifier,
-    classifierDevice: raw.classifier_device,
-    classifierError: raw.classifier_error,
-    routeRuleEnabled: raw.route_rule_enabled,
-    verifyMode: raw.verify_mode,
-    defaultProvider: raw.default_provider,
+  .transform((raw): HealthResponse => ({
+    status: raw.status,
+    indexReady: raw.index_ready,
+    indexName: raw.index_name ?? null,
+    embedderId: raw.embedder_id ?? null,
+    supportedModes: raw.supported_modes,
   }));
 
-/** classification 이벤트 · done 응답의 classification */
-export const routingResultSchema = z
-  .object({
-    label: z.enum(LABELS),
-    text: z.string(),
-    classifier_label: z.string(),
-    scores: z.record(z.string(), z.number()),
-    route: z
-      .object({ route: z.enum(ROUTES), p1: z.number(), margin: z.number(), reason: z.string() })
-      .nullable(),
-    verification: z
-      .object({
-        match: z.boolean(),
-        reason: z.string(),
-        final_label: z.string(),
-        latency_ms: z.number(),
-        error: z.string().nullable(),
-      })
-      .nullable(),
-  })
-  .transform((raw): RoutingResult => ({
-    label: raw.label,
-    text: raw.text,
-    classifierLabel: raw.classifier_label,
-    scores: raw.scores,
-    route: raw.route,
-    verification: raw.verification && {
-      match: raw.verification.match,
-      reason: raw.verification.reason,
-      finalLabel: raw.verification.final_label,
-      latencyMs: raw.verification.latency_ms,
-      error: raw.verification.error,
-    },
-  }));
-
-const toolCallSchema = z.object({
-  name: z.string(),
-  args: z.record(z.string(), z.unknown()),
-  ok: z.boolean(),
-  error: z.string().nullish(),
-  latency_ms: z.number(),
+const citationSchema = z.object({
+  source_id: z.string(),
+  book_id: z.string(),
+  file_name: z.string(),
+  page: z.number().int().min(1),
 });
 
-/** done 이벤트 · 400 응답 본문 */
-export const answerResponseSchema = z
+const queryMetaSchema = z.object({
+  retrieval_mode: z.enum(RETRIEVAL_MODES),
+  latency_ms: z.number().nullish(),
+  input_tokens: z.number().int().nullish(),
+  output_tokens: z.number().int().nullish(),
+  cache_hit: z.boolean().default(false),
+  trace_id: z.string().nullish(),
+});
+
+/** POST /query 응답. 200(answered · needs_clarification · abstained)과 오류 상태 코드(status=error) 모두 이 모양이다 */
+export const queryResponseSchema = z
   .object({
     request_id: z.string(),
     status: z.enum(ANSWER_STATUSES),
-    label: z.string(),
-    answer: z.string().nullable(),
-    provider: z.enum(PROVIDERS),
-    model: z.string(),
-    prompt_version: z.string(),
-    tools_used: z.array(toolCallSchema),
-    latency_ms: z.number(),
-    usage: z.object({ input_tokens: z.number().nullable(), output_tokens: z.number().nullable() }),
-    error: z.object({ code: z.string(), message: z.string() }).nullable(),
-    created_at: z.string(),
-    classification: routingResultSchema.nullable(),
+    answer: z.string(),
+    reason: z.string(),
+    citations: z.array(citationSchema).default([]),
+    error_code: z.enum(ERROR_CODES).nullish(),
+    meta: queryMetaSchema,
   })
-  .transform((raw): AnswerResponse => ({
+  // 계약의 불변식. 어기면 서버 버그라 bad_response 로 드러낸다
+  .superRefine((raw, ctx) => {
+    if ((raw.status === "error") !== (raw.error_code != null)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "error_code 는 status=error 일 때만, 그리고 반드시 있어야 한다",
+      });
+    }
+    if (raw.status === "answered" && raw.citations.length === 0) {
+      ctx.addIssue({ code: "custom", message: "answered 응답은 출처가 1개 이상이어야 한다" });
+    }
+  })
+  .transform((raw): QueryResponse => ({
     requestId: raw.request_id,
     status: raw.status,
-    label: raw.label,
     answer: raw.answer,
-    provider: raw.provider,
-    model: raw.model,
-    promptVersion: raw.prompt_version,
-    toolsUsed: raw.tools_used.map((tool) => ({
-      name: tool.name,
-      args: tool.args,
-      ok: tool.ok,
-      error: tool.error ?? null,
-      latencyMs: tool.latency_ms,
+    reason: raw.reason,
+    citations: raw.citations.map((c) => ({
+      sourceId: c.source_id,
+      bookId: c.book_id,
+      fileName: c.file_name,
+      page: c.page,
     })),
-    latencyMs: raw.latency_ms,
-    usage: { inputTokens: raw.usage.input_tokens, outputTokens: raw.usage.output_tokens },
-    error: raw.error,
-    createdAt: raw.created_at,
-    classification: raw.classification,
+    errorCode: raw.error_code ?? null,
+    meta: {
+      retrievalMode: raw.meta.retrieval_mode,
+      latencyMs: raw.meta.latency_ms ?? null,
+      inputTokens: raw.meta.input_tokens ?? null,
+      outputTokens: raw.meta.output_tokens ?? null,
+      cacheHit: raw.meta.cache_hit,
+      traceId: raw.meta.trace_id ?? null,
+    },
   }));
 
-/** status 이벤트 */
-export const statusEventSchema: z.ZodType<StatusEvent> = z.object({
-  stage: z.enum(STATUS_STAGES),
-  message: z.string(),
+/** 422 응답 본문 (FastAPI 요청 검증 오류) */
+export const validationErrorSchema = z.object({
+  detail: z.array(z.object({ loc: z.array(z.union([z.string(), z.number()])), msg: z.string() })),
 });
 
-/** delta 이벤트 */
-export const deltaEventSchema = z.object({ text: z.string() });
+/** 화면 형식 요청 → 서버 형식 본문 */
+export function toQueryBody(request: QueryRequest): QueryBody {
+  return {
+    question: request.question,
+    retrieval_mode: request.retrievalMode,
+    session_id: request.sessionId,
+  };
+}

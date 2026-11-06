@@ -32,19 +32,17 @@ const COMPONENTS: Components = {
 
 interface MarkdownProps {
   text: string;
-  /** 생성 중이면 마지막 글 끝에 커서 (CSS ::after) */
-  isTyping?: boolean;
   ref?: Ref<HTMLDivElement>;
 }
 
 /** 답변 마크다운 (GFM: 표 · 취소선 · 자동 링크). 줄바꿈 한 번도 줄바꿈으로 보인다 (LLM 답변이 문단 안에서 줄을 나눔) */
 export const Markdown = memo(MarkdownView);
 
-function MarkdownView({ text, isTyping = false, ref }: MarkdownProps) {
+function MarkdownView({ text, ref }: MarkdownProps) {
   return (
     <div
       ref={ref}
-      className={`prose prose-sm max-w-none break-words prose-zinc dark:prose-invert prose-p:my-2 prose-p:leading-7 prose-code:rounded prose-code:bg-zinc-100 prose-code:px-1 prose-code:py-0.5 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none dark:prose-code:bg-zinc-800 prose-li:my-0.5 [&_li]:whitespace-pre-line [&_p]:whitespace-pre-line ${isTyping ? "markdown-typing" : ""}`}
+      className="prose prose-sm max-w-none break-words prose-zinc dark:prose-invert prose-p:my-2 prose-p:leading-7 prose-code:rounded prose-code:bg-zinc-100 prose-code:px-1 prose-code:py-0.5 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none dark:prose-code:bg-zinc-800 prose-li:my-0.5 [&_li]:whitespace-pre-line [&_p]:whitespace-pre-line"
     >
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
         {text}

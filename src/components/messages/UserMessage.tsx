@@ -6,15 +6,14 @@ interface UserMessageProps {
   message: Message;
 }
 
-/** 유저 문의: 오른쪽 말풍선 */
+/** 유저 질문: 오른쪽 말풍선 */
 export const UserMessage = memo(UserMessageView);
 
 function UserMessageView({ message }: UserMessageProps) {
   return (
     <div className="flex flex-col items-end gap-1">
-      {message.regenerated ? <span className="text-xs text-zinc-500">↻ 다시 생성</span> : null}
       <div className="max-w-[85%] rounded-2xl rounded-br-md bg-zinc-200 px-4 py-2.5 text-sm leading-6 break-words whitespace-pre-wrap dark:bg-zinc-800">
-        <span className="sr-only">{message.regenerated ? "다시 생성한 문의: " : "문의: "}</span>
+        <span className="sr-only">질문: </span>
         {message.content}
       </div>
     </div>

@@ -1,0 +1,15 @@
+# 이미지 빌드에 넣지 않는 것 (git 으로 받는 팀원과 같은 내용으로 빌드되게 테스트도 뺀다)
+node_modules
+dist
+.git
+.claude
+.vscode
+.idea
+*.local
+.env
+**/*.test.ts
+**/*.test.tsx
+src/test
+Dockerfile
+compose.yaml
+.dockerignore

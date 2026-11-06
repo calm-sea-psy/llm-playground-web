@@ -1,0 +1,22 @@
+# 화면 실행: docker compose up -d --build → http://localhost:8080
+# 설정은 .env (예시: .env.example). 바꾼 뒤에는 --build 로 다시 띄운다.
+services:
+  web:
+    build:
+      context: .
+      args:
+        VITE_API_MODE: ${VITE_API_MODE:-http}
+    image: llm-playground-web:local
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8000}
+    # Linux 에서도 host.docker.internal 로 내 PC 에서 띄운 백엔드에 닿게 한다 (Docker Desktop 은 원래 된다)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped

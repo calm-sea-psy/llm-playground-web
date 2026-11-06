@@ -1,10 +1,10 @@
 import { useRef, useState } from "react";
 
-import type { Provider } from "./api/types";
+import { RETRIEVAL_MODES, type RetrievalMode } from "./api/types";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { ProviderSelect } from "./components/ProviderSelect";
+import { RetrievalModeSelect } from "./components/RetrievalModeSelect";
 import { Sidebar } from "./components/Sidebar";
 import { SidebarDrawer } from "./components/SidebarDrawer";
 import { ThemeSelect } from "./components/ThemeSelect";
@@ -13,14 +13,16 @@ import { useChat } from "./hooks/useChat";
 import { useDrawer } from "./hooks/useDrawer";
 import { useHealth } from "./hooks/useHealth";
 import { useTheme } from "./hooks/useTheme";
+import { isAwaitingClarification } from "./lib/chat";
+import { DEFAULT_RETRIEVAL_MODE } from "./lib/config";
 
-/** 서버 상태를 모를 때 쓰는 모델 */
-const FALLBACK_PROVIDER: Provider = "local";
+/** 마지막 답이 확인 질문일 때 입력창 안내 */
+const CLARIFY_PLACEHOLDER = "확인 질문에 답하거나 빠진 조건을 넣어 주세요";
 
-/** 상담 도우미 화면: 사이드바(문의 내역 · 서버 상태) + 대화 + 입력창 */
+/** RAG Q&A 화면: 사이드바(질문 내역 · 서버 상태) + 대화 + 입력창 */
 export function App() {
   const { health, recheck } = useHealth();
-  // 답변 요청이 network 오류면 서버 상태도 바로 다시 확인한다 (사이드바 "연결 안 됨"과 맞추려고)
+  // 질문 요청이 network 오류면 서버 상태도 바로 다시 확인한다 (사이드바 "연결 안 됨"과 맞추려고)
   const chat = useChat({ onNetworkError: recheck });
   const { theme, setTheme } = useTheme();
   const {
@@ -33,12 +35,16 @@ export function App() {
   } = useDrawer();
   const { message: announcement, announce } = useAnnouncer();
   const [draft, setDraft] = useState("");
-  /** 사용자가 고르기 전에는 서버 기본값(defaultProvider)을 따른다 */
-  const [chosenProvider, setChosenProvider] = useState<Provider>();
+  const [chosenMode, setChosenMode] = useState<RetrievalMode>(DEFAULT_RETRIEVAL_MODE);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const serverDefault = "health" in health ? health.health.defaultProvider : undefined;
-  const provider = chosenProvider ?? serverDefault ?? FALLBACK_PROVIDER;
+  // 서버가 지원 방식(supported_modes)을 알려 주면 그 안에서만 고른다. 고른 방식이 빠졌으면 첫 방식으로
+  const serverModes = "health" in health ? health.health.supportedModes : [];
+  const modes: readonly RetrievalMode[] = serverModes.length > 0 ? serverModes : RETRIEVAL_MODES;
+  const retrievalMode = modes.includes(chosenMode)
+    ? chosenMode
+    : (modes[0] ?? DEFAULT_RETRIEVAL_MODE);
+  const isClarifying = isAwaitingClarification(chat.messages);
   // 요청은 한 번에 하나: 보고 있는 대화가 받는 중이면 중지 버튼, 다른 대화가 받는 중이면 전송을 막는다
   const isBusyHere = chat.isBusy && chat.activeId === chat.currentId;
   const isBusyElsewhere = chat.isBusy && !isBusyHere;
@@ -62,6 +68,11 @@ export function App() {
 
   function handlePickExample(text: string): void {
     setDraft(text);
+    inputRef.current?.focus();
+  }
+
+  /** 확인 질문에 답할 수 있게 입력창으로 옮긴다 (같은 세션이라 빠진 조건만 적어도 이어서 답한다) */
+  function handleClarify(): void {
     inputRef.current?.focus();
   }
 
@@ -95,7 +106,7 @@ export function App() {
               ref={triggerRef}
               type="button"
               onClick={openDrawer}
-              aria-label="메뉴 열기 (문의 내역 · 서버 상태)"
+              aria-label="메뉴 열기 (질문 내역 · 서버 상태)"
               aria-expanded={isDrawerOpen}
               aria-controls="sidebar"
               className="-ml-1 rounded-lg px-2 py-1 text-lg leading-none hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -103,7 +114,12 @@ export function App() {
               ☰
             </button>
           ) : null}
-          <ProviderSelect value={provider} onChange={setChosenProvider} disabled={chat.isBusy} />
+          <RetrievalModeSelect
+            value={retrievalMode}
+            onChange={setChosenMode}
+            modes={modes}
+            disabled={chat.isBusy}
+          />
           <div className="ml-auto">
             <ThemeSelect value={theme} onChange={setTheme} />
           </div>
@@ -111,13 +127,13 @@ export function App() {
         {/* 대화 영역만 경계로 묶어 사이드바 · 입력창은 살려 둔다. 다른 대화로 옮기면 key 로 새로 그린다 */}
         <ErrorBoundary
           key={chat.currentId ?? "new"}
-          message="이 대화를 표시하지 못했습니다. 다른 문의를 고르거나 새로고침해 주세요."
+          message="이 대화를 표시하지 못했습니다. 다른 질문을 고르거나 새로고침해 주세요."
         >
           <ChatView
             messages={chat.messages}
             isBusy={chat.isBusy}
             onRetry={chat.retry}
-            onRegenerate={chat.regenerate}
+            onClarify={handleClarify}
             onAnnounce={announce}
             onPickExample={handlePickExample}
           />
@@ -125,11 +141,12 @@ export function App() {
         <Composer
           value={draft}
           onChange={setDraft}
-          onSend={(text) => chat.send(text, provider)}
+          onSend={(text) => chat.send(text, retrievalMode)}
           onStop={chat.stop}
           isBusy={isBusyHere}
           isBlocked={isBusyElsewhere}
           inputRef={inputRef}
+          placeholder={isClarifying ? CLARIFY_PLACEHOLDER : undefined}
         />
       </main>
 

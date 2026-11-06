@@ -5,10 +5,15 @@ import type { Message } from "../lib/chat";
 import { AssistantMessage } from "./messages/AssistantMessage";
 import { UserMessage } from "./messages/UserMessage";
 
+/** 화면 제목. index.html 의 title 과 맞춘다 */
+const TITLE = "RAG Q&A";
+
+// 목업에서 응답 상태를 하나씩 보여 주는 예시: answered · answered · needs_clarification("이번 건") · abstained("자료에 없는")
 const EXAMPLES = [
-  "주문한 지 일주일이 넘었는데 계속 배송 준비 중이에요.",
-  "환불 신청했는데 언제 들어오나요?",
-  "서울 날씨 어때요?",
+  "문서에 나온 신청 절차를 단계별로 알려 주세요.",
+  "두 규정이 서로 다르게 적혀 있으면 어느 쪽을 따르나요?",
+  "이번 건 마감이 몇 시죠?",
+  "자료에 없는 내용도 답해 줄 수 있나요?",
 ];
 
 interface EmptyStateProps {
@@ -17,12 +22,13 @@ interface EmptyStateProps {
 
 interface ChatViewProps {
   messages: Message[];
-  /** 답변을 받는 중 (다시 시도 · 다시 생성을 막는다) */
+  /** 답변을 받는 중 (다시 시도를 막는다) */
   isBusy: boolean;
   onRetry: (id: string) => void;
-  onRegenerate: (id: string) => void;
+  /** 확인 질문에서 "조건 보완해서 묻기"를 눌렀을 때 */
+  onClarify?: () => void;
   onAnnounce?: (text: string) => void;
-  /** 빈 대화의 예시 문의를 눌렀을 때 */
+  /** 빈 대화의 예시 질문을 눌렀을 때 */
   onPickExample: (text: string) => void;
 }
 
@@ -35,14 +41,14 @@ export function ChatView({
   messages,
   isBusy,
   onRetry,
-  onRegenerate,
+  onClarify,
   onAnnounce,
   onPickExample,
 }: ChatViewProps) {
   const { containerRef, contentRef, isPinned, scrollToBottom } = useAutoScroll();
   const isEmpty = messages.length === 0;
 
-  // 새 메시지(보낸 문의)가 추가되면 다시 바닥에 붙인다
+  // 새 메시지(보낸 질문)가 추가되면 다시 바닥에 붙인다
   const countRef = useRef(messages.length);
   useEffect(() => {
     if (messages.length > countRef.current) {
@@ -68,17 +74,17 @@ export function ChatView({
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
               {/* 빈 화면의 제목과 같은 자리. 메시지 안 소제목의 윗단계 */}
-              <h1 className="sr-only">Seal 상담 도우미</h1>
+              <h1 className="sr-only">{TITLE}</h1>
               {messages.map((m) =>
                 m.role === "user" ? (
                   <UserMessage key={m.id} message={m} />
                 ) : (
                   <AssistantMessage
-                    // 다시 받기는 같은 id 에 createdAt 만 새로 찍는다 → 타이핑 · 알림 상태를 처음부터
+                    // 다시 받기는 같은 id 에 createdAt 만 새로 찍는다 → 알림 상태를 처음부터
                     key={`${m.id}:${m.createdAt}`}
                     message={m}
                     onRetry={onRetry}
-                    onRegenerate={onRegenerate}
+                    onClarify={onClarify}
                     onAnnounce={onAnnounce}
                     isBusy={isBusy}
                   />
@@ -106,9 +112,10 @@ function EmptyState({ onPickExample }: EmptyStateProps) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6 text-center">
       <div>
-        <h1 className="text-xl font-semibold">Seal 상담 도우미</h1>
+        <h1 className="text-xl font-semibold">{TITLE}</h1>
         <p className="mt-2 text-sm text-zinc-500">
-          고객 문의를 입력하면 분류하고 답변 초안을 작성합니다.
+          질문하면 검색한 자료를 근거로 결론 · 근거 · 출처를 답합니다. 검색 방식을 바꿔 결과를
+          비교할 수 있습니다.
         </p>
       </div>
       <ul className="flex w-full max-w-md flex-col gap-2">

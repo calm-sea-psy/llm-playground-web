@@ -19,7 +19,7 @@ export interface UseChatHistoryResult {
   updateHistory: (change: (history: LoadedHistory) => LoadedHistory, shouldSave?: boolean) => void;
 }
 
-/** 문의 내역을 저장소에서 불러와 들고 있고, 바꿀 때 저장한다. 마지막으로 보던 대화도 맞춰 남긴다 */
+/** 질문 내역을 저장소에서 불러와 들고 있고, 바꿀 때 저장한다. 마지막으로 보던 대화도 맞춰 남긴다 */
 export function useChatHistory(): UseChatHistoryResult {
   const storage = useStorage();
   const [history, setHistory] = useState<LoadedHistory>(() => loadHistory(storage));

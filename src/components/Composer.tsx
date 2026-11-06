@@ -16,11 +16,13 @@ interface ComposerProps {
   isBusy: boolean;
   /** 다른 대화에서 답변을 받는 중 (요청은 한 번에 하나 → 전송을 막고 안내) */
   isBlocked?: boolean;
-  /** 입력창 (보낸 뒤 · 새 문의 때 포커스용) */
+  /** 입력창 (보낸 뒤 · 새 질문 때 포커스용) */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
+  /** 빈 입력창 안내. 없으면 기본 문구 */
+  placeholder?: string;
 }
 
-/** 문의 입력: 자동 높이 textarea · Enter 전송(한글 IME 합성 중 제외) · 전송/중지 */
+/** 질문 입력: 자동 높이 textarea · Enter 전송(한글 IME 합성 중 제외) · 전송/중지 */
 export function Composer({
   value,
   onChange,
@@ -29,6 +31,7 @@ export function Composer({
   isBusy,
   isBlocked = false,
   inputRef,
+  placeholder = "질문을 입력하세요",
 }: ComposerProps) {
   const countId = useId();
   const localRef = useRef<HTMLTextAreaElement>(null);
@@ -90,8 +93,8 @@ export function Composer({
           onKeyDown={handleKeyDown}
           onCompositionEnd={handleCompositionEnd}
           rows={1}
-          placeholder="문의를 입력하세요"
-          aria-label="문의 입력"
+          placeholder={placeholder}
+          aria-label="질문 입력"
           aria-describedby={countId}
           aria-invalid={isTooLong || undefined}
           className="min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-zinc-400"
@@ -109,7 +112,7 @@ export function Composer({
           <button
             type="submit"
             disabled={!canSend}
-            aria-label="문의 전송"
+            aria-label="질문 전송"
             className="shrink-0 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
           >
             전송
@@ -119,15 +122,12 @@ export function Composer({
       <div className="mt-1.5 flex justify-between gap-4 px-2 text-xs text-zinc-500">
         {isBlocked ? (
           <span className="text-amber-700 dark:text-amber-400" role="status">
-            다른 문의의 답변을 받는 중입니다. 끝나면 보낼 수 있습니다.
+            다른 질문의 답변을 받는 중입니다. 끝나면 보낼 수 있습니다.
           </span>
         ) : (
           <span>
-            문의는 하나씩 따로 처리됩니다
-            <span className="hidden sm:inline">
-              {" "}
-              (이전 문의 내용은 이어지지 않음) · Shift+Enter 줄바꿈
-            </span>
+            같은 대화의 질문은 앞 내용을 이어서 답합니다
+            <span className="hidden sm:inline"> (새 대화는 + 새 질문) · Shift+Enter 줄바꿈</span>
           </span>
         )}
         <span
