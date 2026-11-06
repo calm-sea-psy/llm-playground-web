@@ -7,7 +7,7 @@ import { logWarning } from "../lib/logger";
 import type { KeyValueStorage } from "../lib/storage";
 
 /** 고른 테마 저장 키. index.html 의 인라인 스크립트도 같은 키를 읽는다 */
-export const THEME_KEY = "seal-frontend:theme";
+export const THEME_KEY = "llm-playground:theme";
 
 /** useTheme 이 돌려주는 선택값과 변경 함수 */
 export interface UseThemeResult {

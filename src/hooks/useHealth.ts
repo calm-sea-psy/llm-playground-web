@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useApi } from "./useApi";
-import type { Health } from "../api/types";
+import type { HealthResponse } from "../api/types";
 import { HEALTH_INTERVAL_MS } from "../lib/config";
 
 /** 서버 상태 확인 결과 */
 export type HealthState =
   | { kind: "checking" }
-  | { kind: "ok"; health: Health }
-  /** 서버는 떴지만 분류 모델을 불러오지 못함 (/health 는 이때도 status "ok" 를 준다) */
-  | { kind: "classifier_error"; health: Health }
+  | { kind: "ok"; health: HealthResponse }
+  /** 서버는 떴지만 검색 인덱스가 준비되지 않음 (index_ready=false). 질문은 index_not_ready 오류가 된다 */
+  | { kind: "index_not_ready"; health: HealthResponse }
   | { kind: "offline"; reason: string };
 
 /** useHealth 가 돌려주는 상태와 동작 */
 export interface UseHealthResult {
   health: HealthState;
-  /** 지금 바로 확인 (답변 요청이 network 오류로 실패했을 때 서버 상태를 맞추려고) */
+  /** 지금 바로 확인 (질문 요청이 network 오류로 실패했을 때 서버 상태를 맞추려고) */
   recheck: () => void;
 }
 
@@ -31,7 +31,7 @@ export function useHealth(): UseHealthResult {
     async function check(): Promise<void> {
       try {
         const result = await api.getHealth(controller.signal);
-        setHealth({ kind: result.classifierError ? "classifier_error" : "ok", health: result });
+        setHealth({ kind: result.indexReady ? "ok" : "index_not_ready", health: result });
       } catch (e) {
         if (controller.signal.aborted) {
           return;

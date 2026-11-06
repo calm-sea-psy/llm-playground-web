@@ -18,7 +18,7 @@ interface SidebarProps {
   isStorageOk: boolean;
 }
 
-/** 왼쪽 사이드바: 새 문의 · 문의 내역 · 서버 상태 */
+/** 왼쪽 사이드바: 새 질문 · 질문 내역 · 서버 상태 */
 export function Sidebar({
   health,
   conversations,
@@ -40,12 +40,12 @@ export function Sidebar({
           aria-current={currentId === undefined ? "page" : undefined}
           className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-left text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
         >
-          + 새 문의
+          + 새 질문
         </button>
       </div>
 
-      <nav className="min-h-0 flex-1 overflow-y-auto px-3 pb-3" aria-label="문의 내역">
-        <h2 className="px-1 py-2 text-xs font-semibold text-zinc-500">문의 내역</h2>
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 pb-3" aria-label="질문 내역">
+        <h2 className="px-1 py-2 text-xs font-semibold text-zinc-500">질문 내역</h2>
         <HistoryList
           conversations={conversations}
           currentId={currentId}

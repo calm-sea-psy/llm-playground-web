@@ -3,13 +3,14 @@ import { useCallback, useRef, useState } from "react";
 import { useApi } from "./useApi";
 import { useChatHistory } from "./useChatHistory";
 import { useUndoDelete } from "./useUndoDelete";
-import { AnswerStreamError } from "../api/client";
-import type { AnswerError, AnswerResponse, Provider } from "../api/types";
+import { QueryError } from "../api/client";
+import type { QueryResponse, RetrievalMode } from "../api/types";
 import {
   newConversation,
   newId,
   resendTargetOf,
   titleFrom,
+  type AnswerError,
   type Conversation,
   type Message,
 } from "../lib/chat";
@@ -18,20 +19,18 @@ import { logWarning } from "../lib/logger";
 
 const EMPTY: Message[] = [];
 
-const UNKNOWN_ERROR: AnswerError = { code: "unknown", message: "알 수 없는 오류가 발생했습니다" };
-
 interface UseChatOptions {
-  /** 답변 요청이 network 오류로 실패했을 때. 받는 도중에 바뀌지 않게 고정된 함수를 넘긴다 */
+  /** 질문 요청이 network 오류로 실패했을 때. 받는 도중에 바뀌지 않게 고정된 함수를 넘긴다 */
   onNetworkError?: () => void;
 }
 
 /** useChat 이 돌려주는 내역 상태와 동작 */
 export interface UseChatResult {
-  /** 문의를 한 번이라도 보낸 대화 (빈 새 문의는 넣지 않는다) */
+  /** 질문을 한 번이라도 보낸 대화 (빈 새 질문은 넣지 않는다) */
   conversations: Conversation[];
-  /** 보고 있는 대화. 없으면 빈 새 문의 화면 */
+  /** 보고 있는 대화. 없으면 빈 새 질문 화면 */
   currentId: string | undefined;
-  /** 보고 있는 대화의 메시지 (새 문의 화면이면 빈 배열) */
+  /** 보고 있는 대화의 메시지 (새 질문 화면이면 빈 배열) */
   messages: Message[];
   /** 받는 중인 대화 id (없으면 쉬는 중) */
   activeId: string | undefined;
@@ -40,14 +39,12 @@ export interface UseChatResult {
   isStorageOk: boolean;
   /** 방금 지워서 실행 취소할 수 있는 대화 */
   lastDeleted: Conversation | undefined;
-  /** 보고 있는 대화에 문의를 보낸다. 받는 중이거나 빈 문의면 false */
-  send: (text: string, provider: Provider) => boolean;
+  /** 보고 있는 대화에 질문을 보낸다. 받는 중이거나 빈 질문이면 false */
+  send: (text: string, retrievalMode: RetrievalMode) => boolean;
   /** 오류 · 중지된 답변을 같은 자리에서 다시 받는다 */
   retry: (assistantId: string) => void;
-  /** 완료된 답변의 문의를 다시 보내 대화 끝에 새 쌍으로 붙인다. 받는 중이면 false */
-  regenerate: (assistantId: string) => boolean;
   stop: () => void;
-  /** 빈 새 문의 화면 (받던 답변은 원래 대화에서 계속 받는다) */
+  /** 빈 새 질문 화면 = 다음 질문부터 새 세션 (받던 답변은 원래 대화에서 계속 받는다) */
   newChat: () => void;
   select: (id: string) => void;
   /** 대화를 지운다 (받는 중인 대화는 지울 수 없다) */
@@ -56,10 +53,11 @@ export interface UseChatResult {
 }
 
 /**
- * 문의 내역 전체와 전송 · 중지 · 다시 시도 · 대화 전환 · 삭제.
- * - API 는 문의를 하나씩 독립적으로 처리한다 (같은 대화에서 다시 보내도 이전 맥락 없음)
+ * 질문 내역 전체와 전송 · 중지 · 다시 시도 · 대화 전환 · 삭제.
+ * - 대화 하나 = 서버 세션 하나. 첫 질문 때 세션 id 를 받아 대화에 저장하고, 이후 질문은 같은 id 로 보낸다
+ *   (내역에서 예전 대화를 골라 이어 물어도 그 대화의 세션으로 간다)
  * - 요청은 한 번에 하나. 받는 도중 다른 대화로 옮겨도 답변은 원래 대화에서 계속 받는다
- * - 저장소에는 보낸 직후 · done · 오류 · 중지 · 삭제 때만 쓴다 (delta 마다 쓰지 않음)
+ * - 저장소에는 보낸 직후 · 세션을 받은 때 · 응답 · 오류 · 중지 · 삭제 때 쓴다
  */
 export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult {
   const api = useApi();
@@ -99,33 +97,63 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
     [updateHistory],
   );
 
-  /** 대화의 assistantId 메시지에 text 의 답변을 받아 채운다 */
+  /** 대화의 세션 id. 없으면 새로 받아 대화에 저장한다 */
+  const sessionOf = useCallback(
+    async (conversationId: string, signal: AbortSignal): Promise<string> => {
+      const existing = historyRef.current.conversations.find(
+        (c) => c.id === conversationId,
+      )?.sessionId;
+      if (existing) {
+        return existing;
+      }
+      const sessionId = await api.createSession(signal);
+      updateHistory(
+        (h) => ({
+          ...h,
+          conversations: h.conversations.map((c) =>
+            c.id === conversationId ? { ...c, sessionId } : c,
+          ),
+        }),
+        true,
+      );
+      return sessionId;
+    },
+    [api, historyRef, updateHistory],
+  );
+
+  /** 대화의 assistantId 메시지에 question 의 답변을 받아 채운다 */
   const run = useCallback(
-    async (conversationId: string, assistantId: string, text: string, provider: Provider) => {
+    async (
+      conversationId: string,
+      assistantId: string,
+      question: string,
+      retrievalMode: RetrievalMode,
+    ) => {
       const controller = new AbortController();
       controllerRef.current = controller;
       setActiveId(conversationId);
-      const update = (change: (m: Message) => Message, shouldSave = false): void => {
-        updateMessage(conversationId, assistantId, change, shouldSave);
+      const update = (change: (m: Message) => Message): void => {
+        updateMessage(conversationId, assistantId, change, true);
       };
       try {
-        const res = await api.answerStream(
-          { text, provider },
-          {
-            onStatus: (e) => update((m) => ({ ...m, stage: e.stage })),
-            onClassification: (r) => update((m) => ({ ...m, classification: r })),
-            onDelta: (t) => update((m) => ({ ...m, status: "streaming", content: m.content + t })),
-          },
-          controller.signal,
-        );
-        update((m) => finishWith(m, res), true);
+        const sessionId = await sessionOf(conversationId, controller.signal);
+        const res = await api.query({ question, retrievalMode, sessionId }, controller.signal);
+        if (res.status === "error") {
+          // error_code 는 로그용. 화면에는 코드별 사용자용 안내만 보인다
+          logWarning("서버가 오류로 답했다", {
+            requestId: res.requestId,
+            errorCode: res.errorCode,
+            reason: res.reason,
+          });
+        }
+        update((m) => finishWith(m, res));
       } catch (e) {
-        if (e instanceof AnswerStreamError && e.code === "aborted") {
-          update((m) => ({ ...m, status: "stopped", finishedAt: Date.now() }), true);
+        if (e instanceof QueryError && e.code === "aborted") {
+          update((m) => ({ ...m, status: "stopped", finishedAt: Date.now() }));
         } else {
-          logWarning("답변 요청 실패", e); // 화면에는 code · message 만 남아 원본은 여기서 본다
+          logWarning("질문 요청 실패", e); // 화면에는 code 별 안내만 남아 원본은 여기서 본다
           const error = toAnswerError(e);
-          update((m) => ({ ...m, status: "error", error, finishedAt: Date.now() }), true);
+          update((m) => ({ ...m, status: "error", error, finishedAt: Date.now() }));
           if (error.code === "network") {
             onNetworkError?.();
           }
@@ -137,11 +165,11 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         }
       }
     },
-    [api, updateMessage, onNetworkError],
+    [api, sessionOf, updateMessage, onNetworkError],
   );
 
-  const sendMessage = useCallback(
-    (text: string, provider: Provider, isRegenerated: boolean): boolean => {
+  const send = useCallback(
+    (text: string, retrievalMode: RetrievalMode): boolean => {
       const trimmed = text.trim();
       if (!trimmed || controllerRef.current) {
         return false;
@@ -153,7 +181,6 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         content: trimmed,
         status: "done",
         createdAt: now,
-        ...(isRegenerated && { regenerated: true }),
       };
       const assistant: Message = {
         id: newId(),
@@ -161,7 +188,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         content: "",
         status: "pending",
         createdAt: now,
-        provider,
+        retrievalMode,
       };
       const { conversations, currentId } = historyRef.current;
       const existing = conversations.find((c) => c.id === currentId);
@@ -172,7 +199,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         updatedAt: now,
         messages: [...base.messages, user, assistant],
       };
-      // 답변 도중 탭이 닫혀도 문의는 남도록 바로 저장한다
+      // 답변 도중 탭이 닫혀도 질문은 남도록 바로 저장한다
       updateHistory(
         (h) => ({
           currentId: conversation.id,
@@ -182,15 +209,10 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         }),
         true,
       );
-      void run(conversation.id, assistant.id, trimmed, provider);
+      void run(conversation.id, assistant.id, trimmed, retrievalMode);
       return true;
     },
     [historyRef, run, updateHistory],
-  );
-
-  const send = useCallback(
-    (text: string, provider: Provider) => sendMessage(text, provider, false),
-    [sendMessage],
   );
 
   const retry = useCallback(
@@ -210,20 +232,11 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         status: "pending",
         // 화면은 이 값이 바뀌는 것을 보고 메시지를 새로 만든다 (ChatView 의 key). 같은 ms 여도 반드시 바꾼다
         createdAt: Math.max(Date.now(), m.createdAt + 1),
-        provider: target.provider,
+        retrievalMode: target.retrievalMode,
       }));
-      void run(conversation.id, assistantId, target.question, target.provider);
+      void run(conversation.id, assistantId, target.question, target.retrievalMode);
     },
     [historyRef, run, updateMessage],
-  );
-
-  const regenerate = useCallback(
-    (assistantId: string) => {
-      const conversation = currentConversation(historyRef.current);
-      const target = conversation && resendTargetOf(conversation.messages, assistantId);
-      return target ? sendMessage(target.question, target.provider, true) : false;
-    },
-    [historyRef, sendMessage],
   );
 
   const stop = useCallback(() => controllerRef.current?.abort(), []);
@@ -257,7 +270,6 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
     lastDeleted,
     send,
     retry,
-    regenerate,
     stop,
     newChat,
     select,
@@ -273,21 +285,21 @@ function currentConversation({
   return conversations.find((c) => c.id === currentId);
 }
 
-/** done 응답으로 답변을 마무리한다 */
-function finishWith(message: Message, res: AnswerResponse): Message {
-  const finished = {
-    ...message,
-    finishedAt: Date.now(),
-    meta: res,
-    classification: res.classification ?? message.classification,
-  };
-  return res.status === "ok"
-    ? { ...finished, status: "done", content: res.answer ?? message.content }
-    : { ...finished, status: "error", error: res.error ?? UNKNOWN_ERROR };
+/** 응답으로 답변을 마무리한다. 서버 status 가 "error" 면 오류 메시지, 나머지 셋은 done */
+function finishWith(message: Message, res: QueryResponse): Message {
+  const finished = { ...message, finishedAt: Date.now(), response: res };
+  return res.status === "error"
+    ? {
+        ...finished,
+        status: "error",
+        // 계약상 status=error 면 error_code 가 반드시 있다 (schemas.ts 가 검사). 그래도 없으면 일반 안내
+        error: { code: res.errorCode ?? "unknown", message: res.reason },
+      }
+    : { ...finished, status: "done", content: res.answer };
 }
 
 function toAnswerError(e: unknown): AnswerError {
-  if (e instanceof AnswerStreamError) {
+  if (e instanceof QueryError) {
     return { code: e.code, message: e.message };
   }
   return { code: "unknown", message: e instanceof Error ? e.message : String(e) };

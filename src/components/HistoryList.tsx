@@ -19,7 +19,7 @@ interface DateGroup {
   items: Conversation[];
 }
 
-/** 문의 내역: 최신순, 오늘 · 어제 · 지난 7일 · 이전으로 묶는다 */
+/** 질문 내역: 최신순, 오늘 · 어제 · 지난 7일 · 이전으로 묶는다 */
 export const HistoryList = memo(HistoryListView);
 
 function HistoryListView({
@@ -31,7 +31,7 @@ function HistoryListView({
 }: HistoryListProps) {
   const now = useNow();
   if (conversations.length === 0) {
-    return <p className="px-1 text-xs text-zinc-400">아직 문의가 없습니다.</p>;
+    return <p className="px-1 text-xs text-zinc-400">아직 질문이 없습니다.</p>;
   }
 
   const groups = groupByDate(sortByRecent(conversations), now);
@@ -71,7 +71,7 @@ function HistoryListView({
                     <button
                       type="button"
                       onClick={() => onRemove(c.id)}
-                      aria-label={`문의 삭제: ${title}`}
+                      aria-label={`질문 삭제: ${title}`}
                       className="absolute top-1/2 right-1 -translate-y-1/2 rounded-md px-1.5 py-0.5 text-xs text-zinc-400 opacity-0 group-hover:opacity-100 hover:bg-zinc-200 hover:text-zinc-700 focus-visible:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 pointer-coarse:opacity-100"
                     >
                       ✕

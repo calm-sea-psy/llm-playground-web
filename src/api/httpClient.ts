@@ -1,16 +1,12 @@
-import type { z } from "zod";
+import { QueryError, type ApiClient, type QueryErrorCode } from "./client";
+import { healthSchema, queryResponseSchema, toQueryBody, validationErrorSchema } from "./schemas";
+import type { HealthResponse, QueryRequest, QueryResponse } from "./types";
 
-import { AnswerStreamError, type ApiClient, type AnswerStreamHandlers } from "./client";
-import {
-  answerResponseSchema,
-  deltaEventSchema,
-  healthSchema,
-  routingResultSchema,
-  statusEventSchema,
-} from "./schemas";
-import { SseParser, type SseMessage } from "./sse";
-import type { AnswerRequest, AnswerResponse, Health } from "./types";
-import { logWarning } from "../lib/logger";
+/** 422 에서 틀린 필드 → 오류 코드 */
+const INVALID_FIELD_CODES: Partial<Record<string, QueryErrorCode>> = {
+  question: "invalid_question",
+  retrieval_mode: "invalid_retrieval_mode",
+};
 
 /** 실제 서버 클라이언트 설정 */
 export interface HttpApiClientOptions {
@@ -20,11 +16,11 @@ export interface HttpApiClientOptions {
   healthTimeoutMs: number;
 }
 
-/** Seal_LLM API 서버에 붙는 클라이언트 */
+/** RAG Q&A API 서버(/health · /query)에 붙는 클라이언트 */
 export function createHttpApiClient({ baseUrl, healthTimeoutMs }: HttpApiClientOptions): ApiClient {
   const root = baseUrl.replace(/\/+$/, "");
 
-  async function getHealth(signal?: AbortSignal): Promise<Health> {
+  async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
     const timeout = AbortSignal.timeout(healthTimeoutMs);
     const res = await fetch(`${root}/health`, {
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
@@ -39,111 +35,63 @@ export function createHttpApiClient({ baseUrl, healthTimeoutMs }: HttpApiClientO
     return parsed.data;
   }
 
-  async function answerStream(
-    request: AnswerRequest,
-    handlers: AnswerStreamHandlers = {},
-    signal?: AbortSignal,
-  ): Promise<AnswerResponse> {
-    const fail = (cause: unknown, message: string): AnswerStreamError =>
+  // TODO: 서버 세션(/session · Redis)이 확정되면 POST /session 으로 받는다
+  function createSession(): Promise<string> {
+    return Promise.resolve(crypto.randomUUID());
+  }
+
+  async function query(request: QueryRequest, signal?: AbortSignal): Promise<QueryResponse> {
+    const fail = (cause: unknown, message: string): QueryError =>
       signal?.aborted
-        ? new AnswerStreamError("aborted", "중지되었습니다", { cause })
-        : new AnswerStreamError("network", message, { cause });
+        ? new QueryError("aborted", "중지되었습니다", { cause })
+        : new QueryError("network", message, { cause });
 
     let res: Response;
+    let body: unknown;
     try {
-      res = await fetch(`${root}/api/answer/stream`, {
+      res = await fetch(`${root}/query`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify(request),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toQueryBody(request)),
         signal,
       });
     } catch (e) {
       throw fail(e, "API 서버에 연결할 수 없습니다");
     }
-
-    if (!res.ok) {
-      // 입력 오류는 스트림을 열기 전에 HTTP 400 + AnswerResponse(JSON)로 온다
-      const body: unknown = await res.json().catch(() => null);
-      const parsed = answerResponseSchema.safeParse(body);
-      if (parsed.success) {
-        return parsed.data;
-      }
-      throw new AnswerStreamError("network", `API 서버에 연결할 수 없습니다 (HTTP ${res.status})`);
-    }
-    if (!res.body) {
-      throw new AnswerStreamError("bad_response", "응답 본문이 없습니다");
-    }
-
-    const reader = res.body.getReader();
-    const parser = new SseParser();
     try {
-      for (;;) {
-        let chunk: ReadableStreamReadResult<Uint8Array>;
-        try {
-          chunk = await reader.read();
-        } catch (e) {
-          throw fail(e, "API 서버와의 연결이 끊겼습니다");
-        }
-        const messages = chunk.done ? parser.end() : parser.push(chunk.value);
-        for (const message of messages) {
-          const done = dispatch(message, handlers);
-          if (done) {
-            return done;
-          }
-        }
-        if (chunk.done) {
-          throw new AnswerStreamError("incomplete", "답변을 끝까지 받지 못했습니다");
-        }
+      body = await res.json();
+    } catch (e) {
+      if (signal?.aborted) {
+        throw fail(e, "중지되었습니다");
       }
-    } finally {
-      // done 을 받은 뒤 · 오류로 빠져나올 때 연결을 정리한다 (이미 끝났으면 아무 일도 없다)
-      reader.cancel().catch((e: unknown) => logWarning("스트림 정리 실패", e));
+      body = undefined; // 본문이 JSON 이 아니다 (프록시 오류 페이지 등). 아래에서 상태 코드로 판단한다
     }
-  }
 
-  return { getHealth, answerStream };
-}
-
-/** 이벤트 하나를 처리한다. done 이면 그 AnswerResponse 를 돌려준다. 모르는 이벤트는 무시한다 */
-function dispatch(message: SseMessage, handlers: AnswerStreamHandlers): AnswerResponse | undefined {
-  switch (message.event) {
-    // 받는 쪽이 없어도 형식은 검사한다 (깨진 스트림을 조용히 넘기지 않게)
-    case "status": {
-      const event = parseEvent(statusEventSchema, message);
-      handlers.onStatus?.(event);
-      return undefined;
+    const parsed = queryResponseSchema.safeParse(body);
+    if (parsed.success) {
+      return parsed.data; // 200, 또는 status=error 응답(error_code 별 503 · 502 · 504 · 500)
     }
-    case "classification": {
-      const result = parseEvent(routingResultSchema, message);
-      handlers.onClassification?.(result);
-      return undefined;
+    if (res.status === 422) {
+      throw new QueryError(invalidCodeOf(body), "요청이 검증에서 거절되었습니다 (HTTP 422)", {
+        cause: body,
+      });
     }
-    case "delta": {
-      const { text } = parseEvent(deltaEventSchema, message);
-      handlers.onDelta?.(text);
-      return undefined;
+    if (!res.ok && body === undefined) {
+      // JSON 본문 없는 HTTP 오류 = 백엔드에 닿지 못함 (프록시 5xx 등)
+      throw new QueryError("network", `API 서버에 연결할 수 없습니다 (HTTP ${res.status})`);
     }
-    case "done":
-      return parseEvent(answerResponseSchema, message);
-    default:
-      return undefined;
-  }
-}
-
-function parseEvent<T>(schema: z.ZodType<T>, message: SseMessage): T {
-  let data: unknown;
-  try {
-    data = JSON.parse(message.data);
-  } catch (e) {
-    throw new AnswerStreamError("bad_response", `${message.event} 이벤트를 읽을 수 없습니다`, {
-      cause: e,
-    });
-  }
-  const parsed = schema.safeParse(data);
-  if (!parsed.success) {
-    throw new AnswerStreamError("bad_response", `${message.event} 이벤트 형식이 맞지 않습니다`, {
+    // 서버가 JSON 으로 답했지만 계약 모양이 아니다 (불변식 위반 포함). 상태 코드와 상관없이 형식 오류
+    throw new QueryError("bad_response", `응답 형식이 맞지 않습니다 (HTTP ${res.status})`, {
       cause: parsed.error,
     });
   }
-  return parsed.data;
+
+  return { getHealth, createSession, query };
+}
+
+/** 422 본문(FastAPI detail)에서 처음 틀린 필드로 코드를 고른다 */
+function invalidCodeOf(body: unknown): QueryErrorCode {
+  const parsed = validationErrorSchema.safeParse(body);
+  const field = parsed.success ? parsed.data.detail[0]?.loc.at(-1) : undefined;
+  return (typeof field === "string" && INVALID_FIELD_CODES[field]) || "invalid_request";
 }

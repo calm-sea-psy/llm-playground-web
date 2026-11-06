@@ -1,223 +1,185 @@
-// 서버 없이 화면을 돌려 보는 목업 클라이언트. 실제 서버와 같은 순서로 이벤트를 흘린다:
-// status(classifying) → classification → status(answering | adventure) → delta … → done
-//
-// 문의 내용으로 흐름을 고른다.
-// - "배송" · "환불" · "반품" · "계정" · "로그인" → 해당 라벨로 분류하고 답변을 조각으로 흘린다
-// - 그 밖 → 범위 밖(adventure): delta 없이 기다렸다가 done 에 전체 답변 (툴 호출 기록 포함)
-// - "오류" 가 들어 있으면 done(status="error", llm_error)
+// 서버 없이 화면을 돌려 보는 목업 클라이언트. 질문 내용으로 응답 상태를 고른다.
+// - "오류" → status="error" (error_code=model_timeout)
+// - "422" → 422 거절 (invalid_question)
+// - "범위 밖" · "자료에 없는" → abstained (근거 자료 없음)
+// - "이번 건" · "몇 시" → needs_clarification (대상이 특정되지 않음)
+// - 그 밖 → answered
+// 세션마다 몇 번째 질문인지 세어 답 끝에 적는다 (같은 대화가 같은 세션 id 를 보내는지 확인용).
+// 같은 검색 방식으로 같은 질문을 다시 하면 cache_hit 으로 답한다 (서버 Redis 캐시 흉내).
+// 답 내용은 화면 확인용 예시일 뿐 실제 자료가 아니다.
 
-import { AnswerStreamError, type ApiClient, type AnswerStreamHandlers } from "./client";
-import type {
-  AnswerRequest,
-  AnswerResponse,
-  Health,
-  Label,
-  Provider,
-  RoutingResult,
-  ToolCall,
+import { QueryError, type ApiClient } from "./client";
+import {
+  RETRIEVAL_MODES,
+  type AnswerStatus,
+  type Citation,
+  type HealthResponse,
+  type QueryRequest,
+  type QueryResponse,
+  type RetrievalMode,
 } from "./types";
 
 /** 목업 응답 속도 */
 export interface MockApiClientOptions {
-  /** 단계 사이 대기 (분류 · 답변 시작) */
-  stepMs: number;
-  /** 답변 조각 사이 대기 */
-  deltaMs: number;
-  /** 범위 밖 문의의 답변 대기 */
-  adventureMs: number;
+  /** 검색 방식별 응답 대기 (ms). 리랭킹이 가장 느린 실제 서버를 흉내 낸다 */
+  delayMs: Record<RetrievalMode, number>;
 }
 
-const DEFAULT_OPTIONS: MockApiClientOptions = { stepMs: 500, deltaMs: 40, adventureMs: 3000 };
+/** 목업 한 상태의 답 */
+interface MockAnswer {
+  answer: string;
+  reason: string;
+  citations: Citation[];
+}
 
-const MODEL_BY_PROVIDER: Record<Provider, string> = {
-  local: "mock/gemma-3-4b",
-  openai: "mock/gpt-4.1-mini",
+const DEFAULT_OPTIONS: MockApiClientOptions = {
+  delayMs: { naive: 600, hybrid: 900, hybrid_rerank: 1500 },
 };
 
-const KEYWORDS: Array<[Label, RegExp]> = [
-  ["shipping", /배송|택배|도착/],
-  ["refund", /환불|반품|취소/],
-  ["account", /계정|로그인|비밀번호|회원/],
-];
+/** 캐시 적중이면 이만큼만 기다린다 */
+const CACHE_HIT_DELAY_MS = 100;
 
-const ANSWERS: Record<Exclude<Label, "unknown">, string> = {
-  shipping: [
-    "불편을 드려 죄송합니다. 배송 상황을 확인해 보겠습니다.",
-    "",
-    "**확인 방법**",
-    "1. 마이페이지 → 주문 내역에서 송장 번호를 확인해 주세요.",
-    "2. 택배사 조회 화면에서 현재 위치를 볼 수 있습니다.",
-    "",
-    "주문 후 **7일**이 지나도 출고되지 않았다면 상담원이 판매자에게 직접 확인해 드리겠습니다.",
-  ].join("\n"),
-  refund: [
-    "환불은 반품 상품이 도착해 검수가 끝난 뒤 진행됩니다.",
-    "",
-    "| 결제 수단 | 환불 기간 |",
-    "| --- | --- |",
-    "| 신용카드 | 영업일 기준 3~5일 |",
-    "| 계좌이체 | 영업일 기준 1~2일 |",
-    "",
-    "진행 상황은 `마이페이지 > 취소/반품` 에서 확인할 수 있습니다.",
-  ].join("\n"),
-  account: [
-    "로그인이 되지 않으면 아래 순서로 확인해 주세요.",
-    "",
-    "- 비밀번호 찾기로 새 비밀번호를 설정합니다.",
-    "- 5회 이상 틀리면 **30분** 동안 로그인이 잠깁니다.",
-    "- 휴면 계정이면 본인 인증 후 다시 쓸 수 있습니다.",
-  ].join("\n"),
+const HEALTH: HealthResponse = {
+  status: "ok",
+  indexReady: true,
+  indexName: "mock-index",
+  embedderId: "mock-embedder",
+  supportedModes: [...RETRIEVAL_MODES],
 };
 
-const ADVENTURE_ANSWER =
-  "상담 범위 밖의 질문이라 도구를 써서 찾아봤습니다. 오늘 서울은 맑고 낮 기온은 **18도** 안팎입니다.";
-
-const ADVENTURE_TOOLS: ToolCall[] = [
-  { name: "get_today", args: {}, ok: true, error: null, latencyMs: 3 },
-  { name: "get_weather", args: { city: "서울" }, ok: true, error: null, latencyMs: 420 },
-];
-
-/** 목업 서버 상태 */
-const MOCK_HEALTH: Health = {
-  classifier: "mock-classifier",
-  classifierDevice: "cpu",
-  classifierError: null,
-  routeRuleEnabled: true,
-  verifyMode: "uncertain",
-  defaultProvider: "local",
+const ANSWERS: Record<Exclude<AnswerStatus, "error">, MockAnswer> = {
+  answered: {
+    answer: "**[목업] 결론**: 질문에 맞는 답이 여기에 표시됩니다.",
+    reason: "검색한 문서에서 질문과 맞는 부분을 고르고, 나중에 바뀐 공지가 있는지 확인했습니다.",
+    // 같은 문서 · 쪽이 두 번 → 화면은 한 번만 보여야 한다
+    citations: [
+      citation("S1", "manual", 9),
+      citation("S2", "notice", 3),
+      citation("S3", "manual", 9),
+    ],
+  },
+  needs_clarification: {
+    answer: "어느 건(대상)과 어느 날짜 기준을 말씀하시는지 알려 주세요.",
+    reason: "마감 시각은 대상과 기준일에 따라 달라집니다.",
+    citations: [citation("S1", "guide", 2)],
+  },
+  abstained: {
+    answer: "확보한 자료 범위 밖이라 답을 확정할 수 없습니다.",
+    reason:
+      "질문과 맞는 근거를 자료에서 찾지 못했습니다. 관련 문서를 추가하면 다시 확인할 수 있습니다.",
+    citations: [citation("S1", "policy", 1)],
+  },
 };
 
-/** 서버 없이 정해진 시나리오로 답하는 클라이언트 */
+/** 목업 API 클라이언트. 옵션은 테스트에서 대기를 0 으로 줄일 때 쓴다 */
 export function createMockApiClient(options: Partial<MockApiClientOptions> = {}): ApiClient {
-  const { stepMs, deltaMs, adventureMs } = { ...DEFAULT_OPTIONS, ...options };
+  const { delayMs } = { ...DEFAULT_OPTIONS, ...options };
+  /** 세션 id → 지금까지 답한 질문 수 */
+  const turns = new Map<string, number>();
+  /** 이미 답한 "검색 방식:질문" */
+  const answered = new Set<string>();
 
-  async function getHealth(signal?: AbortSignal): Promise<Health> {
-    await wait(0, signal);
-    return MOCK_HEALTH;
+  function getHealth(): Promise<HealthResponse> {
+    return Promise.resolve(HEALTH);
   }
 
-  async function answerStream(
-    request: AnswerRequest,
-    handlers: AnswerStreamHandlers = {},
-    signal?: AbortSignal,
-  ): Promise<AnswerResponse> {
-    const startedAt = Date.now();
-    const provider = request.provider ?? MOCK_HEALTH.defaultProvider;
-    const label = request.label ?? classify(request.text);
+  function createSession(): Promise<string> {
+    return Promise.resolve(crypto.randomUUID());
+  }
 
-    let classification: RoutingResult | null = null;
-    if (!request.label) {
-      handlers.onStatus?.({ stage: "classifying", message: "" });
-      await wait(stepMs, signal);
-      classification = routingResult(label, request.text);
-      handlers.onClassification?.(classification);
+  async function query(request: QueryRequest, signal?: AbortSignal): Promise<QueryResponse> {
+    const cacheKey = `${request.retrievalMode}:${request.question}`;
+    const cacheHit = answered.has(cacheKey);
+    const delay = cacheHit
+      ? Math.min(CACHE_HIT_DELAY_MS, delayMs[request.retrievalMode])
+      : delayMs[request.retrievalMode];
+    await wait(delay, signal);
+    if (request.question.includes("422")) {
+      throw new QueryError("invalid_question", "요청이 검증에서 거절되었습니다 (HTTP 422)");
     }
+    const turn = (turns.get(request.sessionId) ?? 0) + 1;
+    turns.set(request.sessionId, turn);
 
-    const base = {
-      requestId: `mock-${crypto.randomUUID()}`,
-      label,
-      provider,
-      model: MODEL_BY_PROVIDER[provider],
-      promptVersion: "mock-v1",
-      usage: { inputTokens: 120, outputTokens: 80 },
-      createdAt: new Date().toISOString(),
-      classification,
-    };
-
-    if (label === "unknown") {
-      handlers.onStatus?.({ stage: "adventure", message: "" });
-      await wait(adventureMs, signal);
+    const status = statusOf(request.question);
+    const requestId = `mock-${crypto.randomUUID().slice(0, 8)}`;
+    if (status === "error") {
+      // 계약 예시(query_error)와 같은 모양
       return {
-        ...base,
-        status: "ok",
-        answer: ADVENTURE_ANSWER,
-        toolsUsed: ADVENTURE_TOOLS,
-        latencyMs: Date.now() - startedAt,
-        error: null,
+        requestId,
+        status,
+        answer: "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        reason: "model_timeout",
+        citations: [],
+        errorCode: "model_timeout",
+        meta: meta(request.retrievalMode, delay, null, false),
       };
     }
-
-    handlers.onStatus?.({ stage: "answering", message: "" });
-    await wait(stepMs, signal);
-
-    if (request.text.includes("오류")) {
-      return {
-        ...base,
-        status: "error",
-        answer: null,
-        toolsUsed: [],
-        latencyMs: Date.now() - startedAt,
-        error: { code: "llm_error", message: "목업: 모델 서버에 연결할 수 없습니다" },
-      };
-    }
-
-    const answer = ANSWERS[label];
-    for (const piece of splitPieces(answer)) {
-      handlers.onDelta?.(piece);
-      await wait(deltaMs, signal);
-    }
+    answered.add(cacheKey);
+    const { answer, reason, citations } = ANSWERS[status];
     return {
-      ...base,
-      status: "ok",
-      answer,
-      toolsUsed: [],
-      latencyMs: Date.now() - startedAt,
-      error: null,
+      requestId,
+      status,
+      answer: `${answer}\n\n_(목업 · 이 대화의 ${turn}번째 질문)_`,
+      reason,
+      citations,
+      errorCode: null,
+      meta: meta(request.retrievalMode, delay, turn, cacheHit),
     };
   }
 
-  return { getHealth, answerStream };
+  return { getHealth, createSession, query };
 }
 
-function classify(text: string): Label {
-  return KEYWORDS.find(([, pattern]) => pattern.test(text))?.[0] ?? "unknown";
-}
-
-function routingResult(label: Label, text: string): RoutingResult {
-  const known = label !== "unknown";
-  const scores: Record<string, number> = { shipping: 0.1, refund: 0.1, account: 0.1 };
-  if (known) {
-    scores[label] = 0.8;
+function statusOf(question: string): AnswerStatus {
+  if (question.includes("오류")) {
+    return "error";
   }
+  if (/범위 밖|자료에 없는/.test(question)) {
+    return "abstained";
+  }
+  if (/이번 건|몇 시/.test(question)) {
+    return "needs_clarification";
+  }
+  return "answered";
+}
+
+/** 응답 meta. turn 이 없으면(오류) 토큰도 없다 */
+function meta(
+  retrievalMode: RetrievalMode,
+  latencyMs: number,
+  turn: number | null,
+  cacheHit: boolean,
+): QueryResponse["meta"] {
   return {
-    label,
-    text,
-    classifierLabel: known ? label : "shipping",
-    scores,
-    route: known
-      ? { route: "confident", p1: 0.8, margin: 0.7, reason: "" }
-      : { route: "unknown", p1: 0.1, margin: 0, reason: "모든 라벨의 확률이 낮음" },
-    verification: null,
+    retrievalMode,
+    latencyMs,
+    inputTokens: turn === null ? null : 1000 + turn * 200,
+    outputTokens: turn === null ? null : 180,
+    cacheHit,
+    traceId: null,
   };
 }
 
-/** 실제 스트림처럼 2~6글자씩 자른다 (코드 포인트 단위) */
-function splitPieces(text: string): string[] {
-  const chars = Array.from(text);
-  const pieces: string[] = [];
-  for (let i = 0; i < chars.length;) {
-    const size = 2 + (i % 5);
-    pieces.push(chars.slice(i, i + size).join(""));
-    i += size;
-  }
-  return pieces;
+function citation(sourceId: string, bookId: string, page: number): Citation {
+  return { sourceId, bookId, fileName: `${bookId}.pdf`, page };
 }
 
-function wait(ms: number, signal?: AbortSignal): Promise<void> {
+/** ms 만큼 기다린다. 그사이 중지되면 aborted 로 거절한다 */
+function wait(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve, reject) => {
+    const aborted = (): QueryError => new QueryError("aborted", "중지되었습니다");
     if (signal?.aborted) {
-      reject(new AnswerStreamError("aborted", "중지되었습니다"));
+      reject(aborted());
       return;
     }
     const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", abort);
+      signal?.removeEventListener("abort", handleAbort);
       resolve();
     }, ms);
-    signal?.addEventListener("abort", abort, { once: true });
-
-    function abort(): void {
+    function handleAbort(): void {
       clearTimeout(timer);
-      reject(new AnswerStreamError("aborted", "중지되었습니다"));
+      reject(aborted());
     }
+    signal?.addEventListener("abort", handleAbort, { once: true });
   });
 }

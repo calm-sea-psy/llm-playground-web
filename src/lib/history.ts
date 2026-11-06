@@ -1,32 +1,20 @@
-// 문의 내역 저장 (브라우저 저장소). 저장 API 가 없어 브라우저에만 남는다.
+// 질문 내역 저장 (브라우저 저장소). 저장 API 가 없어 브라우저에만 남는다.
 // 모든 읽기 · 쓰기는 try/catch — 저장이 안 되는 환경(시크릿 창 · 차단 · 용량 초과)에서도 화면은 동작한다.
-//
-// 저장 형식
-// - v2: 화면 형식(camelCase) 그대로
-// - v1: 답변 메타(meta · classification)가 서버 형식(snake_case). 불러올 때 v2 로 바꾸고, 다음 저장 때 v1 키를 지운다
+// 저장 형식은 화면 형식(camelCase) 그대로다.
 
 import { z } from "zod";
 
 import { MESSAGE_ROLES, MESSAGE_STATUSES, type Conversation, type Message } from "./chat";
 import { logWarning } from "./logger";
 import type { KeyValueStorage } from "./storage";
-import { answerResponseSchema, routingResultSchema } from "../api/schemas";
-import {
-  ANSWER_STATUSES,
-  LABELS,
-  PROVIDERS,
-  ROUTES,
-  STATUS_STAGES,
-  type AnswerResponse,
-  type RoutingResult,
-} from "../api/types";
+import { ANSWER_STATUSES, ERROR_CODES, RETRIEVAL_MODES, type QueryResponse } from "../api/types";
 
-/** 문의 내역 저장 키 (v2) */
-export const HISTORY_KEY = "seal-frontend:conversations:v2";
-/** 예전 저장본 키. 불러올 때만 읽고 다음 저장 때 지운다 */
-export const LEGACY_HISTORY_KEY = "seal-frontend:conversations:v1";
+/** 질문 내역 저장 키 */
+export const HISTORY_KEY = "llm-playground:conversations:v1";
 /** 마지막으로 보던 대화 저장 키 */
-export const CURRENT_KEY = "seal-frontend:current:v1";
+export const CURRENT_KEY = "llm-playground:current:v1";
+/** 저장본 안의 형식 버전. 저장 모양이 바뀌면 올린다 (다른 버전 저장본은 빈 내역으로 본다) */
+export const HISTORY_VERSION = 3; // 3: 계약 QueryResponse(error_code · meta) + 세션 id. 1 · 2 는 이전 형식
 
 /** 보관 한도 (최신순). 대화 하나는 메타까지 수 KB → localStorage 한도(약 5MB) 안에 넉넉하다 */
 export const MAX_CONVERSATIONS = 200;
@@ -41,93 +29,76 @@ export interface LoadedHistory {
   currentId: string | undefined;
 }
 
-/** 저장본 버전마다 메타를 읽는 방법 */
-interface MetaReaders {
-  meta: z.ZodType<AnswerResponse | undefined>;
-  classification: z.ZodType<RoutingResult | undefined>;
-}
-
 const answerErrorSchema = z.object({ code: z.string(), message: z.string() });
 
-/** 화면 형식(camelCase) 그대로 저장한 RoutingResult */
-const storedRoutingResultSchema: z.ZodType<RoutingResult> = z.object({
-  label: z.enum(LABELS),
-  text: z.string(),
-  classifierLabel: z.string(),
-  scores: z.record(z.string(), z.number()),
-  route: z
-    .object({ route: z.enum(ROUTES), p1: z.number(), margin: z.number(), reason: z.string() })
-    .nullable(),
-  verification: z
-    .object({
-      match: z.boolean(),
-      reason: z.string(),
-      finalLabel: z.string(),
-      latencyMs: z.number(),
-      error: z.string().nullable(),
-    })
-    .nullable(),
-});
-
-/** 화면 형식(camelCase) 그대로 저장한 AnswerResponse */
-const storedAnswerResponseSchema: z.ZodType<AnswerResponse> = z.object({
+/** 화면 형식(camelCase) 그대로 저장한 QueryResponse */
+const storedQueryResponseSchema: z.ZodType<QueryResponse> = z.object({
   requestId: z.string(),
   status: z.enum(ANSWER_STATUSES),
-  label: z.string(),
-  answer: z.string().nullable(),
-  provider: z.enum(PROVIDERS),
-  model: z.string(),
-  promptVersion: z.string(),
-  toolsUsed: z.array(
-    z.object({
-      name: z.string(),
-      args: z.record(z.string(), z.unknown()),
-      ok: z.boolean(),
-      error: z.string().nullable(),
-      latencyMs: z.number(),
-    }),
+  answer: z.string(),
+  reason: z.string(),
+  citations: z.array(
+    z.object({ sourceId: z.string(), bookId: z.string(), fileName: z.string(), page: z.number() }),
   ),
-  latencyMs: z.number(),
-  usage: z.object({ inputTokens: z.number().nullable(), outputTokens: z.number().nullable() }),
-  error: answerErrorSchema.nullable(),
-  createdAt: z.string(),
-  classification: storedRoutingResultSchema.nullable(),
+  errorCode: z.enum(ERROR_CODES).nullable(),
+  meta: z.object({
+    retrievalMode: z.enum(RETRIEVAL_MODES),
+    latencyMs: z.number().nullable(),
+    inputTokens: z.number().nullable(),
+    outputTokens: z.number().nullable(),
+    cacheHit: z.boolean(),
+    traceId: z.string().nullable(),
+  }),
 });
 
-// v2 메타도 렌더링이 그대로 읽는 값이라 전체 모양을 검증한다 (틀리면 렌더 중 예외). 맞지 않으면 그 메타만 버린다
-const V2_READERS: MetaReaders = {
-  meta: storedAnswerResponseSchema.optional().catch(undefined),
-  classification: storedRoutingResultSchema.optional().catch(undefined),
-};
+const messageSchema = z
+  .object({
+    id: z.string(),
+    role: z.enum(MESSAGE_ROLES),
+    content: z.string(),
+    status: z.enum(MESSAGE_STATUSES),
+    createdAt: z.number(),
+    retrievalMode: z.enum(RETRIEVAL_MODES).optional().catch(undefined),
+    // 응답은 렌더링이 그대로 읽는 값이라 전체 모양을 검증한다 (틀리면 렌더 중 예외). 맞지 않으면 그 응답만 버린다
+    response: storedQueryResponseSchema.optional().catch(undefined),
+    error: answerErrorSchema.optional().catch(undefined),
+    finishedAt: z.number().optional().catch(undefined),
+  })
+  .transform((m): Message => ({
+    ...withoutUndefined(m),
+    // 받는 도중 탭이 닫혔던 답변
+    status: m.status === "pending" ? "stopped" : m.status,
+  }));
 
-// v1 메타는 서버 형식 → 서버 응답과 같은 스키마로 바꾼다
-const V1_READERS: MetaReaders = {
-  meta: answerResponseSchema.optional().catch(undefined),
-  classification: routingResultSchema.optional().catch(undefined),
-};
+const conversationSchema: z.ZodType<Conversation> = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    createdAt: z.number(),
+    updatedAt: z.number(),
+    sessionId: z.string().optional().catch(undefined),
+    messages: z.array(messageSchema),
+  })
+  .transform((c): Conversation => withoutUndefined(c));
 
 /**
  * 저장된 내역을 불러온다. 깨진 대화는 버리고 나머지는 살린다.
- * 저장 도중 탭이 닫혀 pending · streaming 으로 남은 답변은 stopped 로 바꾼다.
+ * 받는 도중 탭이 닫혀 pending 으로 남은 답변은 stopped 로 바꾼다.
  */
 export function loadHistory(storage: KeyValueStorage): LoadedHistory {
   let raw: string | null;
-  let legacyRaw: string | null;
   let current: string | null;
   try {
     raw = storage.getItem(HISTORY_KEY);
-    legacyRaw = raw === null ? storage.getItem(LEGACY_HISTORY_KEY) : null;
     current = storage.getItem(CURRENT_KEY);
   } catch (e) {
-    logWarning("문의 내역을 읽지 못했다", e);
+    logWarning("질문 내역을 읽지 못했다", e);
     return { conversations: [], currentId: undefined };
   }
 
-  const list = raw === null ? readList(legacyRaw, 1) : readList(raw, 2);
-  const schema = conversationSchema(raw === null ? V1_READERS : V2_READERS);
   const conversations = sortByRecent(
-    list.flatMap((value) => {
-      const parsed = schema.safeParse(value);
+    readList(raw).flatMap((value) => {
+      const parsed = conversationSchema.safeParse(value);
       return parsed.success ? [parsed.data] : [];
     }),
   );
@@ -144,12 +115,14 @@ export function saveHistory(storage: KeyValueStorage, conversations: Conversatio
   let keep = sortByRecent(conversations).slice(0, MAX_CONVERSATIONS);
   for (;;) {
     try {
-      storage.setItem(HISTORY_KEY, JSON.stringify({ version: 2, conversations: keep }));
-      storage.removeItem(LEGACY_HISTORY_KEY);
+      storage.setItem(
+        HISTORY_KEY,
+        JSON.stringify({ version: HISTORY_VERSION, conversations: keep }),
+      );
       return true;
     } catch (e) {
       if (!isQuotaError(e) || keep.length <= 1) {
-        logWarning("문의 내역을 저장하지 못했다", e);
+        logWarning("질문 내역을 저장하지 못했다", e);
         return false;
       }
       keep = keep.slice(0, Math.floor(keep.length * SHRINK_RATIO));
@@ -157,7 +130,7 @@ export function saveHistory(storage: KeyValueStorage, conversations: Conversatio
   }
 }
 
-/** 마지막으로 보던 대화를 남긴다 (새로고침하면 다시 연다). 없으면 새 문의 화면 */
+/** 마지막으로 보던 대화를 남긴다 (새로고침하면 다시 연다). 없으면 새 질문 화면 */
 export function saveCurrentId(storage: KeyValueStorage, id: string | undefined): void {
   try {
     if (id) {
@@ -175,7 +148,7 @@ export function sortByRecent(conversations: Conversation[]): Conversation[] {
   return [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-function readList(raw: string | null, version: number): unknown[] {
+function readList(raw: string | null): unknown[] {
   if (raw === null) {
     return [];
   }
@@ -183,52 +156,14 @@ function readList(raw: string | null, version: number): unknown[] {
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    logWarning("문의 내역 저장본이 깨져 있어 버린다", e);
+    logWarning("질문 내역 저장본이 깨져 있어 버린다", e);
     return [];
   }
-  return isObject(parsed) && parsed.version === version && Array.isArray(parsed.conversations)
+  return isObject(parsed) &&
+    parsed.version === HISTORY_VERSION &&
+    Array.isArray(parsed.conversations)
     ? parsed.conversations
     : [];
-}
-
-function conversationSchema(readers: MetaReaders): z.ZodType<Conversation> {
-  const messageSchema = z
-    .object({
-      id: z.string(),
-      role: z.enum(MESSAGE_ROLES),
-      content: z.string(),
-      status: z.enum(MESSAGE_STATUSES),
-      createdAt: z.number(),
-      stage: z.enum(STATUS_STAGES).optional().catch(undefined),
-      classification: readers.classification,
-      provider: z.enum(PROVIDERS).optional().catch(undefined),
-      meta: readers.meta,
-      error: answerErrorSchema.optional().catch(undefined),
-      finishedAt: z.number().optional().catch(undefined),
-      regenerated: z.boolean().optional().catch(undefined),
-    })
-    .transform((m): Message => ({
-      ...withoutUndefined(m),
-      // 받는 도중 탭이 닫혔던 답변
-      status: m.status === "pending" || m.status === "streaming" ? "stopped" : m.status,
-    }));
-
-  return z
-    .object({
-      id: z.string(),
-      title: z.string(),
-      createdAt: z.number(),
-      updatedAt: z.number().optional(),
-      messages: z.array(messageSchema),
-    })
-    .transform((c): Conversation => ({
-      id: c.id,
-      title: c.title,
-      createdAt: c.createdAt,
-      // updatedAt 이 없는 예전 저장본은 createdAt 으로 채운다
-      updatedAt: c.updatedAt ?? c.createdAt,
-      messages: c.messages,
-    }));
 }
 
 /** 값이 undefined 인 선택 필드를 빼서, 저장본과 같은 모양을 유지한다 */

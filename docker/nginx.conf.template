@@ -1,0 +1,32 @@
+# ${BACKEND_URL} 은 컨테이너 시작 때 환경변수로 채워진다 (nginx 이미지의 envsubst).
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # API: 같은 주소로 받아 백엔드로 넘긴다. 백엔드가 꺼져 있으면 502 → 화면은 "연결 안 됨"
+    location = /health {
+        proxy_pass ${BACKEND_URL};
+        proxy_connect_timeout 5s;
+    }
+
+    location = /query {
+        proxy_pass ${BACKEND_URL};
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # 검색 · 리랭킹 · 모델 호출이 길어질 수 있다 (계약 예시의 model_timeout 이 30초)
+        proxy_read_timeout 120s;
+    }
+
+    # 빌드 파일 이름에 해시가 붙어 오래 캐시해도 된다
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # 화면 진입점은 캐시하지 않는다 (새 빌드가 바로 보이게)
+    location / {
+        add_header Cache-Control "no-cache";
+        try_files $uri $uri/ /index.html;
+    }
+}

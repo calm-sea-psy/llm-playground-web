@@ -1,131 +1,84 @@
 // 화면 안에서 쓰는 API 데이터 형식 (camelCase).
-// 서버 응답(snake_case)은 httpClient 가 schemas.ts 로 검증 · 변환해서 이 형식으로 넘긴다.
+// 원본 계약: 팀 저장소 packages/common/src/common/{types,api}.py (RAG Q&A 인터페이스 계약 뷰어).
+// 서버 형식(snake_case)은 httpClient 가 schemas.ts 로 검증 · 변환해서 이 형식으로 넘긴다.
+// TODO: contracts/openapi.json 을 받으면 서버 형식 타입은 생성해서 쓰고, 이 파일은 화면 형식만 남긴다
 
-/** 답변 모델 제공자 */
-export const PROVIDERS = ["local", "openai"] as const;
-/** PROVIDERS 의 값 하나 */
-export type Provider = (typeof PROVIDERS)[number];
+/** 검색 방식 (RetrievalMode) */
+export const RETRIEVAL_MODES = ["naive", "hybrid", "hybrid_rerank"] as const;
+/** RETRIEVAL_MODES 의 값 하나 */
+export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
 
-/** 서버의 LLM 검증 모드 */
-export const VERIFY_MODES = ["off", "uncertain", "all"] as const;
-/** VERIFY_MODES 의 값 하나 */
-export type VerifyMode = (typeof VERIFY_MODES)[number];
-
-/** 분류 라벨 */
-export const LABELS = ["shipping", "refund", "account", "unknown"] as const;
-/** LABELS 의 값 하나 */
-export type Label = (typeof LABELS)[number];
-
-/** 경로 규칙의 판정 */
-export const ROUTES = ["confident", "low_confidence", "ambiguous", "unknown"] as const;
-/** ROUTES 의 값 하나 */
-export type Route = (typeof ROUTES)[number];
-
-/** /api/answer/stream 의 status 이벤트 단계. adventure = 범위 밖(unknown) 문의 (delta 없이 done 에 전체 답변) */
-export const STATUS_STAGES = ["classifying", "answering", "adventure"] as const;
-/** STATUS_STAGES 의 값 하나 */
-export type StatusStage = (typeof STATUS_STAGES)[number];
-
-/** 답변 결과의 상태 */
-export const ANSWER_STATUSES = ["ok", "error"] as const;
+/** 답변 상태 (AnswerStatus) */
+export const ANSWER_STATUSES = ["answered", "needs_clarification", "abstained", "error"] as const;
 /** ANSWER_STATUSES 의 값 하나 */
 export type AnswerStatus = (typeof ANSWER_STATUSES)[number];
 
-/** 서버 상태 (/health) */
-export interface Health {
-  classifier: string | null;
-  classifierDevice: string | null;
-  /** 분류 모델을 불러오지 못한 이유. 있으면 서버는 떴지만 분류는 안 된다 */
-  classifierError: string | null;
-  routeRuleEnabled: boolean;
-  verifyMode: VerifyMode;
-  defaultProvider: Provider;
+/** status=error 일 때만 오는 오류 분류 (ErrorCode). 로그용이며 화면에는 사용자용 문구만 보인다 */
+export const ERROR_CODES = [
+  "index_not_ready",
+  "retrieval_failed",
+  "model_timeout",
+  "model_failed",
+  "output_invalid",
+  "ingest_failed",
+  "internal",
+] as const;
+/** ERROR_CODES 의 값 하나 */
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** GET /health (HealthResponse) */
+export interface HealthResponse {
+  status: "ok";
+  /** false 면 서버는 떴지만 검색 인덱스가 준비되지 않았다 */
+  indexReady: boolean;
+  indexName: string | null;
+  embedderId: string | null;
+  /** 서버가 지원하는 검색 방식. 비어 있으면 알려 주지 않은 것 */
+  supportedModes: RetrievalMode[];
 }
 
-/** 경로 규칙 판정 */
-export interface RouteDecision {
-  route: Route;
-  /** 1위 확률 (보정 후) */
-  p1: number;
-  /** 1 · 2위 확률 차이 */
-  margin: number;
-  reason: string;
+/** 출처 한 건 (Citation). sourceId 는 요청 안에서만 유효하고 화면에 보이지 않는다 */
+export interface Citation {
+  sourceId: string;
+  bookId: string;
+  /** 문서명 (예: manual.pdf) */
+  fileName: string;
+  /** 쪽 번호 (첫 쪽 = 1) */
+  page: number;
 }
 
-/** LLM 검증 결과 */
-export interface Verification {
-  match: boolean;
-  reason: string;
-  finalLabel: string;
-  latencyMs: number;
-  error: string | null;
-}
-
-/** 분류 결과 (classification 이벤트 · done 응답) */
-export interface RoutingResult {
-  label: Label;
-  text: string;
-  classifierLabel: string;
-  /** 분류기 확률 (보정 전) */
-  scores: Record<string, number>;
-  route: RouteDecision | null;
-  verification: Verification | null;
-}
-
-/** 답변 중 호출한 툴 하나 */
-export interface ToolCall {
-  name: string;
-  args: Record<string, unknown>;
-  ok: boolean;
-  error: string | null;
-  latencyMs: number;
-}
-
-/** 서버 오류 코드. 이 밖의 값도 올 수 있어 화면은 문자열로 다룬다 */
-export type ErrorCode = "invalid_input" | "config_error" | "llm_error" | "llm_timeout";
-
-/** 오류 내용. code 는 서버 error.code 또는 AnswerStreamError code */
-export interface AnswerError {
-  code: string;
-  message: string;
-}
-
-/** 답변에 쓴 토큰 수. 모델이 알려 주지 않으면 null */
-export interface TokenUsage {
+/** 응답 부가 정보 (QueryMeta) */
+export interface QueryMeta {
+  /** 실제로 쓴 검색 방식 */
+  retrievalMode: RetrievalMode;
+  latencyMs: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  /** 캐시에서 꺼낸 응답 */
+  cacheHit: boolean;
+  traceId: string | null;
 }
 
-/** 답변 결과 (done 이벤트). status 가 "error" 면 answer 는 null 이고 error 가 있다 */
-export interface AnswerResponse {
+/** POST /query 응답 (QueryResponse) */
+export interface QueryResponse {
   requestId: string;
   status: AnswerStatus;
-  label: string;
-  answer: string | null;
-  provider: Provider;
-  model: string;
-  promptVersion: string;
-  toolsUsed: ToolCall[];
-  /** 답변 생성 시간 (분류 · 검증 제외) */
-  latencyMs: number;
-  usage: TokenUsage;
-  error: AnswerError | null;
-  createdAt: string;
-  classification: RoutingResult | null;
+  /** 결론. needs_clarification 이면 되묻는 문장, abstained 면 보류 이유, error 면 서버의 사용자용 문구 */
+  answer: string;
+  /** 근거 */
+  reason: string;
+  /** answered 면 1개 이상 */
+  citations: Citation[];
+  /** status 가 "error" 일 때만, 그리고 반드시 있다 */
+  errorCode: ErrorCode | null;
+  meta: QueryMeta;
 }
 
-/** 답변 스트림의 status 이벤트 */
-export interface StatusEvent {
-  stage: StatusStage;
-  message: string;
-}
-
-/** 답변 요청 */
-export interface AnswerRequest {
-  /** 문의 원문 (1~2000자) */
-  text: string;
-  /** 생략 시 서버 기본값 */
-  provider?: Provider;
-  /** 넣으면 분류를 건너뜀 (테스트용) */
-  label?: Label;
+/** POST /query 요청 (QueryRequest). 계약에서는 검색 방식 · 세션 id 가 선택이지만 화면은 항상 보낸다 */
+export interface QueryRequest {
+  /** 질문 원문 (1~MAX_INPUT_LENGTH 자, 공백만은 안 됨) */
+  question: string;
+  retrievalMode: RetrievalMode;
+  /** 대화 세션 id (최대 128자). 같은 대화의 질문은 같은 id 로 보내 앞 문맥을 잇는다 */
+  sessionId: string;
 }
