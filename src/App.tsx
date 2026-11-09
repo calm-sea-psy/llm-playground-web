@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { RETRIEVAL_MODES, type RetrievalMode } from "./api/types";
 import { ChatView } from "./components/ChatView";
@@ -24,6 +24,7 @@ export function App() {
   const { health, recheck } = useHealth();
   // 질문이 서버 쪽 문제로 실패하면 서버 상태도 바로 다시 확인한다 (사이드바 표시와 맞추려고)
   const chat = useChat({ onServerTrouble: recheck });
+  const { select: selectConversation } = chat;
   const { theme, setTheme } = useTheme();
   const {
     isDrawer,
@@ -59,12 +60,16 @@ export function App() {
     }
   }
 
-  function handleSelect(id: string): void {
-    chat.select(id);
-    if (isDrawer) {
-      closeDrawer();
-    }
-  }
+  // 글자를 칠 때마다(draft) App 이 다시 그려지므로, memo 된 내역 · 답변에 넘기는 함수는 고정한다
+  const handleSelect = useCallback(
+    (id: string) => {
+      selectConversation(id);
+      if (isDrawer) {
+        closeDrawer();
+      }
+    },
+    [selectConversation, isDrawer, closeDrawer],
+  );
 
   function handlePickExample(text: string): void {
     setDraft(text);
@@ -72,9 +77,7 @@ export function App() {
   }
 
   /** 확인 질문에 답할 수 있게 입력창으로 옮긴다 (같은 세션이라 빠진 조건만 적어도 이어서 답한다) */
-  function handleClarify(): void {
-    inputRef.current?.focus();
-  }
+  const handleClarify = useCallback(() => inputRef.current?.focus(), []);
 
   return (
     <div className="flex h-full">
