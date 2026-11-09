@@ -17,6 +17,9 @@ export const HEALTH_INTERVAL_MS = 30_000;
 /** /health 응답 대기 한도 (넘으면 연결 안 됨으로 본다) */
 export const HEALTH_TIMEOUT_MS = 5_000;
 
+/** /query 응답 대기 한도. nginx 의 proxy_read_timeout(120초)이 먼저 504 를 주도록 조금 길게 둔다 */
+export const QUERY_TIMEOUT_MS = 130_000;
+
 /**
  * 질문 최대 글자 수. 서버 검증 한도가 정해지면 맞춘다 (넘으면 422).
  * 서버는 Python len 기준이라 코드 포인트로 센다

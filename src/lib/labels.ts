@@ -60,6 +60,10 @@ const ERROR_GUIDES: Partial<Record<string, ErrorGuide>> = {
     text: "API 서버에 연결할 수 없습니다. 서버 상태를 확인한 뒤 다시 시도해 주세요.",
     canRetry: true,
   },
+  timeout: {
+    text: "응답을 너무 오래 기다렸습니다. 서버 상태를 확인한 뒤 다시 시도해 주세요.",
+    canRetry: true,
+  },
   bad_response: { text: "서버 응답 형식이 올바르지 않습니다.", canRetry: true },
   invalid_question: { text: "질문을 확인해 주세요 (비어 있거나 너무 깁니다).", canRetry: false },
   invalid_retrieval_mode: {

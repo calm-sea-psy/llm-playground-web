@@ -15,17 +15,24 @@ export interface HttpApiClientOptions {
   baseUrl: string;
   /** /health 응답 대기 한도 */
   healthTimeoutMs: number;
+  /** /query 응답 대기 한도. 응답이 오지 않아도 다음 질문을 막지 않게 한다 */
+  queryTimeoutMs: number;
 }
 
 /** 중지 신호에 시간 제한을 더한 신호 */
 interface TimedSignal {
   signal: AbortSignal;
+  hasTimedOut: () => boolean;
   /** 타이머와 구독을 정리한다. 요청이 끝나면 부른다 */
   dispose: () => void;
 }
 
 /** RAG Q&A API 서버(/health · /query)에 붙는 클라이언트 */
-export function createHttpApiClient({ baseUrl, healthTimeoutMs }: HttpApiClientOptions): ApiClient {
+export function createHttpApiClient({
+  baseUrl,
+  healthTimeoutMs,
+  queryTimeoutMs,
+}: HttpApiClientOptions): ApiClient {
   const root = baseUrl.replace(/\/+$/, "");
 
   async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
@@ -51,30 +58,40 @@ export function createHttpApiClient({ baseUrl, healthTimeoutMs }: HttpApiClientO
   }
 
   async function query(request: QueryRequest, signal?: AbortSignal): Promise<QueryResponse> {
-    const fail = (cause: unknown, message: string): QueryError =>
-      signal?.aborted
-        ? new QueryError("aborted", "중지되었습니다", { cause })
-        : new QueryError("network", message, { cause });
+    const timed = withTimeout(signal, queryTimeoutMs);
+    const fail = (cause: unknown, message: string): QueryError => {
+      if (signal?.aborted) {
+        return new QueryError("aborted", "중지되었습니다", { cause });
+      }
+      if (timed.hasTimedOut()) {
+        return new QueryError("timeout", "응답 시간이 초과되었습니다", { cause });
+      }
+      return new QueryError("network", message, { cause });
+    };
 
-    let res: Response;
     try {
-      res = await fetch(`${root}/query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toQueryBody(request)),
-        signal,
-      });
-    } catch (e) {
-      throw fail(e, "API 서버에 연결할 수 없습니다");
-    }
+      let res: Response;
+      try {
+        res = await fetch(`${root}/query`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(toQueryBody(request)),
+          signal: timed.signal,
+        });
+      } catch (e) {
+        throw fail(e, "API 서버에 연결할 수 없습니다");
+      }
 
-    let text: string;
-    try {
-      text = await res.text();
-    } catch (e) {
-      throw fail(e, "API 서버와의 연결이 끊겼습니다");
+      let text: string;
+      try {
+        text = await res.text();
+      } catch (e) {
+        throw fail(e, "API 서버와의 연결이 끊겼습니다");
+      }
+      return toQueryResponse(res, parseJson(text));
+    } finally {
+      timed.dispose();
     }
-    return toQueryResponse(res, parseJson(text));
   }
 
   return { getHealth, createSession, query };
@@ -129,8 +146,12 @@ function invalidCodeOf(body: unknown): QueryErrorCode {
  */
 function withTimeout(outer: AbortSignal | undefined, timeoutMs: number): TimedSignal {
   const controller = new AbortController();
+  let isTimedOut = false;
   const handleOuterAbort = (): void => controller.abort(outer?.reason);
-  const timer = setTimeout(() => controller.abort(new Error("응답 시간 초과")), timeoutMs);
+  const timer = setTimeout(() => {
+    isTimedOut = true;
+    controller.abort(new Error("응답 시간 초과"));
+  }, timeoutMs);
 
   if (outer?.aborted) {
     handleOuterAbort();
@@ -140,6 +161,7 @@ function withTimeout(outer: AbortSignal | undefined, timeoutMs: number): TimedSi
 
   return {
     signal: controller.signal,
+    hasTimedOut: () => isTimedOut,
     dispose: () => {
       clearTimeout(timer);
       outer?.removeEventListener("abort", handleOuterAbort);
