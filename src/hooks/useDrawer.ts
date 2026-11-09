@@ -40,6 +40,14 @@ export function useDrawer(): UseDrawerResult {
     }
   }, []);
 
+  // 넓은 화면이 되면 덮개 상태를 지운다. 안 지우면 다시 좁아질 때 저절로 열린다
+  useEffect(() => {
+    if (!isDrawer) {
+      return undefined;
+    }
+    return () => setIsOpenState(false);
+  }, [isDrawer]);
+
   useEffect(() => {
     if (!isOpen) {
       return undefined;
