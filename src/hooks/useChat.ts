@@ -77,7 +77,7 @@ export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult
   // 앱은 페이지를 닫을 때만 사라지고, 그때는 브라우저가 요청을 끊는다.
   const controllerRef = useRef<AbortController>(undefined);
 
-  /** 메시지 하나만 바꾼다 (나머지 메시지 객체는 그대로 → memo 된 컴포넌트는 다시 그리지 않는다) */
+  /** 메시지 하나만 바꾸고 대화의 마지막 활동 시각을 맞춘다 (나머지 메시지 객체는 그대로 → memo 된 컴포넌트는 다시 그리지 않는다) */
   const updateMessage = useCallback(
     (
       conversationId: string,
@@ -90,7 +90,11 @@ export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult
           ...h,
           conversations: h.conversations.map((c) =>
             c.id === conversationId
-              ? { ...c, messages: c.messages.map((m) => (m.id === messageId ? change(m) : m)) }
+              ? {
+                  ...c,
+                  updatedAt: Date.now(),
+                  messages: c.messages.map((m) => (m.id === messageId ? change(m) : m)),
+                }
               : c,
           ),
         }),
