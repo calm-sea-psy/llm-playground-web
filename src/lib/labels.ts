@@ -1,7 +1,7 @@
 // 화면 표시 이름은 이 파일 한 곳에 모은다.
 
 import type { QueryErrorCode } from "../api/client";
-import type { ErrorCode, RetrievalMode } from "../api/types";
+import { RETRIEVAL_MODES, type ErrorCode, type RetrievalMode } from "../api/types";
 
 /** 화면 테마 */
 export const THEMES = ["system", "light", "dark"] as const;
@@ -74,7 +74,14 @@ const UNKNOWN_ERROR_GUIDE: ErrorGuide = {
   canRetry: true,
 };
 
-/** 오류 코드별 안내. 모르는 코드는 일반 안내 */
+/** 오류 코드별 안내. 모르는 코드(서버에 새로 생긴 코드 포함)는 일반 안내 */
 export function errorGuide(code: string): ErrorGuide {
-  return ERROR_GUIDES[code] ?? UNKNOWN_ERROR_GUIDE;
+  // 코드는 서버가 준 문자열이라 constructor 같은 값이 Object 의 속성을 집지 않게 한다
+  return (Object.hasOwn(ERROR_GUIDES, code) && ERROR_GUIDES[code]) || UNKNOWN_ERROR_GUIDE;
+}
+
+/** 검색 방식 표시 이름. 모르는 값은 서버가 준 그대로 */
+export function retrievalModeName(mode: string): string {
+  const known = RETRIEVAL_MODES.find((m) => m === mode);
+  return known ? RETRIEVAL_MODE_NAMES[known] : mode;
 }

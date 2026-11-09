@@ -94,5 +94,6 @@ export function createHttpApiClient({ baseUrl, healthTimeoutMs }: HttpApiClientO
 function invalidCodeOf(body: unknown): QueryErrorCode {
   const parsed = validationErrorSchema.safeParse(body);
   const field = parsed.success ? parsed.data.detail[0]?.loc.at(-1) : undefined;
-  return (typeof field === "string" && INVALID_FIELD_CODES[field]) || "invalid_request";
+  const isKnownField = typeof field === "string" && Object.hasOwn(INVALID_FIELD_CODES, field);
+  return (isKnownField && INVALID_FIELD_CODES[field]) || "invalid_request";
 }

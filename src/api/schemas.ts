@@ -5,7 +5,6 @@ import { z } from "zod";
 
 import {
   ANSWER_STATUSES,
-  ERROR_CODES,
   RETRIEVAL_MODES,
   type HealthResponse,
   type QueryRequest,
@@ -27,7 +26,7 @@ export const healthSchema = z
     index_ready: z.boolean(),
     index_name: z.string().nullish(),
     embedder_id: z.string().nullish(),
-    supported_modes: z.array(z.enum(RETRIEVAL_MODES)).default([]),
+    supported_modes: z.array(z.string()).default([]).transform(knownModes),
   })
   .transform((raw): HealthResponse => ({
     status: raw.status,
@@ -45,7 +44,7 @@ const citationSchema = z.object({
 });
 
 const queryMetaSchema = z.object({
-  retrieval_mode: z.enum(RETRIEVAL_MODES),
+  retrieval_mode: z.string(),
   latency_ms: z.number().nullish(),
   input_tokens: z.number().int().nullish(),
   output_tokens: z.number().int().nullish(),
@@ -61,7 +60,7 @@ export const queryResponseSchema = z
     answer: z.string(),
     reason: z.string(),
     citations: z.array(citationSchema).default([]),
-    error_code: z.enum(ERROR_CODES).nullish(),
+    error_code: z.string().nullish(),
     meta: queryMetaSchema,
   })
   // 계약의 불변식. 어기면 서버 버그라 bad_response 로 드러낸다
@@ -102,6 +101,11 @@ export const queryResponseSchema = z
 export const validationErrorSchema = z.object({
   detail: z.array(z.object({ loc: z.array(z.union([z.string(), z.number()])), msg: z.string() })),
 });
+
+/** 화면이 아는 검색 방식만 서버가 준 순서대로 남긴다. 서버에 새 방식이 생겨도 /health 전체를 버리지 않게 */
+function knownModes(modes: string[]): RetrievalMode[] {
+  return modes.flatMap((mode) => RETRIEVAL_MODES.filter((known) => known === mode));
+}
 
 /** 화면 형식 요청 → 서버 형식 본문 */
 export function toQueryBody(request: QueryRequest): QueryBody {

@@ -13,7 +13,7 @@ import {
 } from "./chat";
 import { logWarning } from "./logger";
 import type { KeyValueStorage } from "./storage";
-import { ANSWER_STATUSES, ERROR_CODES, RETRIEVAL_MODES, type QueryResponse } from "../api/types";
+import { ANSWER_STATUSES, RETRIEVAL_MODES, type QueryResponse } from "../api/types";
 
 /** 질문 내역 저장 키 */
 export const HISTORY_KEY = "llm-playground:conversations:v1";
@@ -46,9 +46,9 @@ const storedQueryResponseSchema: z.ZodType<QueryResponse> = z.object({
   citations: z.array(
     z.object({ sourceId: z.string(), bookId: z.string(), fileName: z.string(), page: z.number() }),
   ),
-  errorCode: z.enum(ERROR_CODES).nullable(),
+  errorCode: z.string().nullable(),
   meta: z.object({
-    retrievalMode: z.enum(RETRIEVAL_MODES),
+    retrievalMode: z.string(),
     latencyMs: z.number().nullable(),
     inputTokens: z.number().nullable(),
     outputTokens: z.number().nullable(),
