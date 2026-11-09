@@ -17,23 +17,32 @@ export interface HttpApiClientOptions {
   healthTimeoutMs: number;
 }
 
+/** 중지 신호에 시간 제한을 더한 신호 */
+interface TimedSignal {
+  signal: AbortSignal;
+  /** 타이머와 구독을 정리한다. 요청이 끝나면 부른다 */
+  dispose: () => void;
+}
+
 /** RAG Q&A API 서버(/health · /query)에 붙는 클라이언트 */
 export function createHttpApiClient({ baseUrl, healthTimeoutMs }: HttpApiClientOptions): ApiClient {
   const root = baseUrl.replace(/\/+$/, "");
 
   async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
-    const timeout = AbortSignal.timeout(healthTimeoutMs);
-    const res = await fetch(`${root}/health`, {
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+    const timed = withTimeout(signal, healthTimeoutMs);
+    try {
+      const res = await fetch(`${root}/health`, { signal: timed.signal });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const parsed = healthSchema.safeParse(await res.json());
+      if (!parsed.success) {
+        throw new Error("상태 응답 형식이 맞지 않습니다", { cause: parsed.error });
+      }
+      return parsed.data;
+    } finally {
+      timed.dispose();
     }
-    const parsed = healthSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      throw new Error("상태 응답 형식이 맞지 않습니다", { cause: parsed.error });
-    }
-    return parsed.data;
   }
 
   // TODO: 서버 세션(/session · Redis)이 확정되면 POST /session 으로 받는다
@@ -112,4 +121,28 @@ function invalidCodeOf(body: unknown): QueryErrorCode {
   const field = parsed.success ? parsed.data.detail[0]?.loc.at(-1) : undefined;
   const isKnownField = typeof field === "string" && Object.hasOwn(INVALID_FIELD_CODES, field);
   return (isKnownField && INVALID_FIELD_CODES[field]) || "invalid_request";
+}
+
+/**
+ * 시간 제한을 더한 신호를 만든다.
+ * AbortSignal.any 가 없는 브라우저(Safari 17.3 · Firefox 123 · Chrome 115 이하)에서도 돌도록 직접 잇는다.
+ */
+function withTimeout(outer: AbortSignal | undefined, timeoutMs: number): TimedSignal {
+  const controller = new AbortController();
+  const handleOuterAbort = (): void => controller.abort(outer?.reason);
+  const timer = setTimeout(() => controller.abort(new Error("응답 시간 초과")), timeoutMs);
+
+  if (outer?.aborted) {
+    handleOuterAbort();
+  } else {
+    outer?.addEventListener("abort", handleOuterAbort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      outer?.removeEventListener("abort", handleOuterAbort);
+    },
+  };
 }
