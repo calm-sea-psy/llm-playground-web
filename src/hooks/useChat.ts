@@ -60,7 +60,7 @@ export interface UseChatResult {
  * - 대화 하나 = 서버 세션 하나. 첫 질문 때 세션 id 를 받아 대화에 저장하고, 이후 질문은 같은 id 로 보낸다
  *   (내역에서 예전 대화를 골라 이어 물어도 그 대화의 세션으로 간다)
  * - 요청은 한 번에 하나. 받는 도중 다른 대화로 옮겨도 답변은 원래 대화에서 계속 받는다
- * - 저장소에는 보낸 직후 · 세션을 받은 때 · 응답 · 오류 · 중지 · 삭제 때 쓴다
+ * - 저장소에는 질문을 보낼 때(새 대화는 세션 id 를 받은 때) · 응답 · 오류 · 중지 · 삭제 때 쓴다
  */
 export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult {
   const api = useApi();
@@ -209,7 +209,8 @@ export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult
         updatedAt: now,
         messages: [...base.messages, user, assistant],
       };
-      // 답변 도중 탭이 닫혀도 질문은 남도록 바로 저장한다
+      // 답변 도중 탭이 닫혀도 질문은 남도록 바로 저장한다. 세션이 없으면 sessionOf 가 id 를 받아 함께 저장한다
+      // (내역 전체를 쓰는 일이라 같은 내용을 두 번 쓰지 않는다)
       updateHistory(
         (h) => ({
           currentId: conversation.id,
@@ -217,7 +218,7 @@ export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult
             ? h.conversations.map((c) => (c.id === conversation.id ? conversation : c))
             : [conversation, ...h.conversations],
         }),
-        true,
+        conversation.sessionId !== undefined,
       );
       void run(conversation.id, assistant.id, trimmed, retrievalMode);
       return true;
