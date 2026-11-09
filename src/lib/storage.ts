@@ -5,6 +5,13 @@ export interface KeyValueStorage {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
   removeItem: (key: string) => void;
+  /**
+   * 다른 탭이 저장소를 바꾸면 알린다.
+   *
+   * @param onChange 바뀐 키를 받는다. 전체를 지웠으면 null
+   * @returns 구독을 끊는 함수
+   */
+  subscribe: (onChange: (key: string | null) => void) => () => void;
 }
 
 /** 브라우저 localStorage 구현. 차단된 환경에서는 window.localStorage 를 읽기만 해도 예외라, 부를 때 접근한다 */
@@ -16,6 +23,11 @@ export function createBrowserStorage(): KeyValueStorage {
     },
     removeItem: (key) => {
       localStorage.removeItem(key);
+    },
+    subscribe: (onChange) => {
+      const handleStorage = (e: StorageEvent): void => onChange(e.key);
+      window.addEventListener("storage", handleStorage);
+      return () => window.removeEventListener("storage", handleStorage);
     },
   };
 }
