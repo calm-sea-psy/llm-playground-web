@@ -1,6 +1,7 @@
 import { QueryError, type ApiClient, type QueryErrorCode } from "./client";
 import { healthSchema, queryResponseSchema, toQueryBody, validationErrorSchema } from "./schemas";
 import type { HealthResponse, QueryRequest, QueryResponse } from "./types";
+import { randomUuid } from "../lib/uuid";
 
 /** 422 에서 틀린 필드 → 오류 코드 */
 const INVALID_FIELD_CODES: Partial<Record<string, QueryErrorCode>> = {
@@ -37,7 +38,7 @@ export function createHttpApiClient({ baseUrl, healthTimeoutMs }: HttpApiClientO
 
   // TODO: 서버 세션(/session · Redis)이 확정되면 POST /session 으로 받는다
   function createSession(): Promise<string> {
-    return Promise.resolve(crypto.randomUUID());
+    return Promise.resolve(randomUuid());
   }
 
   async function query(request: QueryRequest, signal?: AbortSignal): Promise<QueryResponse> {
