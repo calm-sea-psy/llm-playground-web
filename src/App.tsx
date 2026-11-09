@@ -22,8 +22,8 @@ const CLARIFY_PLACEHOLDER = "확인 질문에 답하거나 빠진 조건을 넣�
 /** RAG Q&A 화면: 사이드바(질문 내역 · 서버 상태) + 대화 + 입력창 */
 export function App() {
   const { health, recheck } = useHealth();
-  // 질문 요청이 network 오류면 서버 상태도 바로 다시 확인한다 (사이드바 "연결 안 됨"과 맞추려고)
-  const chat = useChat({ onNetworkError: recheck });
+  // 질문이 서버 쪽 문제로 실패하면 서버 상태도 바로 다시 확인한다 (사이드바 표시와 맞추려고)
+  const chat = useChat({ onServerTrouble: recheck });
   const { theme, setTheme } = useTheme();
   const {
     isDrawer,

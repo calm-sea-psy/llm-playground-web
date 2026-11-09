@@ -19,9 +19,12 @@ import { logWarning } from "../lib/logger";
 
 const EMPTY: Message[] = [];
 
+/** 이 오류로 실패하면 사이드바의 서버 상태도 틀렸을 수 있어 다시 확인하게 한다 */
+const SERVER_TROUBLE_CODES = new Set<string>(["network", "timeout", "index_not_ready"]);
+
 interface UseChatOptions {
-  /** 질문 요청이 network 오류로 실패했을 때. 받는 도중에 바뀌지 않게 고정된 함수를 넘긴다 */
-  onNetworkError?: () => void;
+  /** 질문이 서버 쪽 문제(연결 실패 · 시간 초과 · 인덱스 미준비)로 실패했을 때. 받는 도중에 바뀌지 않게 고정된 함수를 넘긴다 */
+  onServerTrouble?: () => void;
 }
 
 /** useChat 이 돌려주는 내역 상태와 동작 */
@@ -59,7 +62,7 @@ export interface UseChatResult {
  * - 요청은 한 번에 하나. 받는 도중 다른 대화로 옮겨도 답변은 원래 대화에서 계속 받는다
  * - 저장소에는 보낸 직후 · 세션을 받은 때 · 응답 · 오류 · 중지 · 삭제 때 쓴다
  */
-export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult {
+export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult {
   const api = useApi();
   const { history, historyRef, isStorageOk, updateHistory } = useChatHistory();
   const {
@@ -147,6 +150,9 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
           });
         }
         update((m) => finishWith(m, res));
+        if (res.errorCode && SERVER_TROUBLE_CODES.has(res.errorCode)) {
+          onServerTrouble?.();
+        }
       } catch (e) {
         if (e instanceof QueryError && e.code === "aborted") {
           update((m) => ({ ...m, status: "stopped", finishedAt: Date.now() }));
@@ -154,8 +160,8 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
           logWarning("질문 요청 실패", e); // 화면에는 code 별 안내만 남아 원본은 여기서 본다
           const error = toAnswerError(e);
           update((m) => ({ ...m, status: "error", error, finishedAt: Date.now() }));
-          if (error.code === "network") {
-            onNetworkError?.();
+          if (SERVER_TROUBLE_CODES.has(error.code)) {
+            onServerTrouble?.();
           }
         }
       } finally {
@@ -165,7 +171,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         }
       }
     },
-    [api, sessionOf, updateMessage, onNetworkError],
+    [api, sessionOf, updateMessage, onServerTrouble],
   );
 
   const send = useCallback(
