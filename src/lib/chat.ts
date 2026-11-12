@@ -1,3 +1,4 @@
+import { randomUuid } from "./uuid";
 import type { QueryResponse, RetrievalMode } from "../api/types";
 
 /** 사이드바 제목 최대 글자 수 */
@@ -64,7 +65,7 @@ export function isReceiving(message: Message): boolean {
 
 /** 메시지 · 대화 id */
 export function newId(): string {
-  return crypto.randomUUID();
+  return randomUuid();
 }
 
 /** 메시지가 없는 새 대화 */

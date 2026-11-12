@@ -7,12 +7,14 @@ import type { HealthResponse, QueryRequest, QueryResponse } from "./types";
  * 이 코드가 아니라 QueryResponse 로 온다.
  * - aborted: 사용자가 중지함
  * - network: 연결 실패 · 연결 끊김 · 응답 본문이 없는 HTTP 오류 (프록시 5xx = 백엔드 꺼짐)
+ * - timeout: 응답 대기 한도(QUERY_TIMEOUT_MS)를 넘김
  * - bad_response: 형식이 맞지 않는 응답
  * - invalid_question · invalid_retrieval_mode · invalid_request: 422 (어느 필드가 틀렸는지)
  */
 export type QueryErrorCode =
   | "aborted"
   | "network"
+  | "timeout"
   | "bad_response"
   | "invalid_question"
   | "invalid_retrieval_mode"

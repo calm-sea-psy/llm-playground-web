@@ -13,7 +13,10 @@ export const ANSWER_STATUSES = ["answered", "needs_clarification", "abstained", 
 /** ANSWER_STATUSES 의 값 하나 */
 export type AnswerStatus = (typeof ANSWER_STATUSES)[number];
 
-/** status=error 일 때만 오는 오류 분류 (ErrorCode). 로그용이며 화면에는 사용자용 문구만 보인다 */
+/**
+ * 계약의 오류 분류 (ErrorCode). status=error 일 때만 오고, 로그용이라 화면에는 사용자용 문구만 보인다.
+ * 서버에 새 코드가 생겨도 응답을 버리지 않도록 응답(QueryResponse.errorCode)은 문자열로 받는다
+ */
 export const ERROR_CODES = [
   "index_not_ready",
   "retrieval_failed",
@@ -33,7 +36,7 @@ export interface HealthResponse {
   indexReady: boolean;
   indexName: string | null;
   embedderId: string | null;
-  /** 서버가 지원하는 검색 방식. 비어 있으면 알려 주지 않은 것 */
+  /** 서버가 지원하는 검색 방식 중 화면이 아는 것. 비어 있으면 알려 주지 않은 것 */
   supportedModes: RetrievalMode[];
 }
 
@@ -49,8 +52,8 @@ export interface Citation {
 
 /** 응답 부가 정보 (QueryMeta) */
 export interface QueryMeta {
-  /** 실제로 쓴 검색 방식 */
-  retrievalMode: RetrievalMode;
+  /** 실제로 쓴 검색 방식. 보통 RetrievalMode 지만 서버가 준 값을 그대로 둔다 */
+  retrievalMode: string;
   latencyMs: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -69,8 +72,8 @@ export interface QueryResponse {
   reason: string;
   /** answered 면 1개 이상 */
   citations: Citation[];
-  /** status 가 "error" 일 때만, 그리고 반드시 있다 */
-  errorCode: ErrorCode | null;
+  /** status 가 "error" 일 때만, 그리고 반드시 있다. 보통 ErrorCode */
+  errorCode: string | null;
   meta: QueryMeta;
 }
 

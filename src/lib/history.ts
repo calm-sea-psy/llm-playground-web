@@ -4,10 +4,16 @@
 
 import { z } from "zod";
 
-import { MESSAGE_ROLES, MESSAGE_STATUSES, type Conversation, type Message } from "./chat";
+import {
+  isReceiving,
+  MESSAGE_ROLES,
+  MESSAGE_STATUSES,
+  type Conversation,
+  type Message,
+} from "./chat";
 import { logWarning } from "./logger";
 import type { KeyValueStorage } from "./storage";
-import { ANSWER_STATUSES, ERROR_CODES, RETRIEVAL_MODES, type QueryResponse } from "../api/types";
+import { ANSWER_STATUSES, RETRIEVAL_MODES, type QueryResponse } from "../api/types";
 
 /** 질문 내역 저장 키 */
 export const HISTORY_KEY = "llm-playground:conversations:v1";
@@ -40,9 +46,9 @@ const storedQueryResponseSchema: z.ZodType<QueryResponse> = z.object({
   citations: z.array(
     z.object({ sourceId: z.string(), bookId: z.string(), fileName: z.string(), page: z.number() }),
   ),
-  errorCode: z.enum(ERROR_CODES).nullable(),
+  errorCode: z.string().nullable(),
   meta: z.object({
-    retrievalMode: z.enum(RETRIEVAL_MODES),
+    retrievalMode: z.string(),
     latencyMs: z.number().nullable(),
     inputTokens: z.number().nullable(),
     outputTokens: z.number().nullable(),
@@ -141,6 +147,20 @@ export function saveCurrentId(storage: KeyValueStorage, id: string | undefined):
   } catch (e) {
     logWarning("마지막으로 보던 대화를 저장하지 못했다", e); // 화면은 그대로 동작한다
   }
+}
+
+/**
+ * 다른 탭이 저장한 대화를 이 탭 내역에 반영한다. 저장본이 기준이라 다른 탭에서 지운 대화는 여기서도 사라진다.
+ * 이 탭이 답변을 받는 중인 대화만 이 탭 것을 남긴다.
+ *
+ * @returns 보던 대화가 사라졌으면 currentId 는 undefined (새 질문 화면)
+ */
+export function mergeSavedHistory(local: LoadedHistory, saved: Conversation[]): LoadedHistory {
+  const receiving = local.conversations.filter((c) => c.messages.some(isReceiving));
+  const receivingIds = new Set(receiving.map((c) => c.id));
+  const conversations = [...receiving, ...saved.filter((c) => !receivingIds.has(c.id))];
+  const hasCurrent = conversations.some((c) => c.id === local.currentId);
+  return { conversations, currentId: hasCurrent ? local.currentId : undefined };
 }
 
 /** 최신 활동순으로 정렬한 새 배열 */

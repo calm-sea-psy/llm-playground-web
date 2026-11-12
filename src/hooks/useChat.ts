@@ -19,9 +19,12 @@ import { logWarning } from "../lib/logger";
 
 const EMPTY: Message[] = [];
 
+/** 이 오류로 실패하면 사이드바의 서버 상태도 틀렸을 수 있어 다시 확인하게 한다 */
+const SERVER_TROUBLE_CODES = new Set<string>(["network", "timeout", "index_not_ready"]);
+
 interface UseChatOptions {
-  /** 질문 요청이 network 오류로 실패했을 때. 받는 도중에 바뀌지 않게 고정된 함수를 넘긴다 */
-  onNetworkError?: () => void;
+  /** 질문이 서버 쪽 문제(연결 실패 · 시간 초과 · 인덱스 미준비)로 실패했을 때. 받는 도중에 바뀌지 않게 고정된 함수를 넘긴다 */
+  onServerTrouble?: () => void;
 }
 
 /** useChat 이 돌려주는 내역 상태와 동작 */
@@ -57,9 +60,9 @@ export interface UseChatResult {
  * - 대화 하나 = 서버 세션 하나. 첫 질문 때 세션 id 를 받아 대화에 저장하고, 이후 질문은 같은 id 로 보낸다
  *   (내역에서 예전 대화를 골라 이어 물어도 그 대화의 세션으로 간다)
  * - 요청은 한 번에 하나. 받는 도중 다른 대화로 옮겨도 답변은 원래 대화에서 계속 받는다
- * - 저장소에는 보낸 직후 · 세션을 받은 때 · 응답 · 오류 · 중지 · 삭제 때 쓴다
+ * - 저장소에는 질문을 보낼 때(새 대화는 세션 id 를 받은 때) · 응답 · 오류 · 중지 · 삭제 때 쓴다
  */
-export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult {
+export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult {
   const api = useApi();
   const { history, historyRef, isStorageOk, updateHistory } = useChatHistory();
   const {
@@ -74,7 +77,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
   // 앱은 페이지를 닫을 때만 사라지고, 그때는 브라우저가 요청을 끊는다.
   const controllerRef = useRef<AbortController>(undefined);
 
-  /** 메시지 하나만 바꾼다 (나머지 메시지 객체는 그대로 → memo 된 컴포넌트는 다시 그리지 않는다) */
+  /** 메시지 하나만 바꾸고 대화의 마지막 활동 시각을 맞춘다 (나머지 메시지 객체는 그대로 → memo 된 컴포넌트는 다시 그리지 않는다) */
   const updateMessage = useCallback(
     (
       conversationId: string,
@@ -87,7 +90,11 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
           ...h,
           conversations: h.conversations.map((c) =>
             c.id === conversationId
-              ? { ...c, messages: c.messages.map((m) => (m.id === messageId ? change(m) : m)) }
+              ? {
+                  ...c,
+                  updatedAt: Date.now(),
+                  messages: c.messages.map((m) => (m.id === messageId ? change(m) : m)),
+                }
               : c,
           ),
         }),
@@ -147,6 +154,9 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
           });
         }
         update((m) => finishWith(m, res));
+        if (res.errorCode && SERVER_TROUBLE_CODES.has(res.errorCode)) {
+          onServerTrouble?.();
+        }
       } catch (e) {
         if (e instanceof QueryError && e.code === "aborted") {
           update((m) => ({ ...m, status: "stopped", finishedAt: Date.now() }));
@@ -154,8 +164,8 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
           logWarning("질문 요청 실패", e); // 화면에는 code 별 안내만 남아 원본은 여기서 본다
           const error = toAnswerError(e);
           update((m) => ({ ...m, status: "error", error, finishedAt: Date.now() }));
-          if (error.code === "network") {
-            onNetworkError?.();
+          if (SERVER_TROUBLE_CODES.has(error.code)) {
+            onServerTrouble?.();
           }
         }
       } finally {
@@ -165,7 +175,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         }
       }
     },
-    [api, sessionOf, updateMessage, onNetworkError],
+    [api, sessionOf, updateMessage, onServerTrouble],
   );
 
   const send = useCallback(
@@ -199,7 +209,8 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
         updatedAt: now,
         messages: [...base.messages, user, assistant],
       };
-      // 답변 도중 탭이 닫혀도 질문은 남도록 바로 저장한다
+      // 답변 도중 탭이 닫혀도 질문은 남도록 바로 저장한다. 세션이 없으면 sessionOf 가 id 를 받아 함께 저장한다
+      // (내역 전체를 쓰는 일이라 같은 내용을 두 번 쓰지 않는다)
       updateHistory(
         (h) => ({
           currentId: conversation.id,
@@ -207,7 +218,7 @@ export function useChat({ onNetworkError }: UseChatOptions = {}): UseChatResult 
             ? h.conversations.map((c) => (c.id === conversation.id ? conversation : c))
             : [conversation, ...h.conversations],
         }),
-        true,
+        conversation.sessionId !== undefined,
       );
       void run(conversation.id, assistant.id, trimmed, retrievalMode);
       return true;

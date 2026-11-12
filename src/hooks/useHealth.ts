@@ -19,18 +19,27 @@ export interface UseHealthResult {
   recheck: () => void;
 }
 
-/** /health 를 주기적으로 확인한다. 탭이 다시 보이면 바로 한 번 더 확인한다 */
+/**
+ * /health 를 주기적으로 확인한다. 탭이 다시 보이면 바로 한 번 더 확인한다.
+ * 새로 확인할 때 앞선 요청을 중지해, 늦게 끝난 옛 결과가 새 결과를 덮어쓰지 않게 한다.
+ */
 export function useHealth(): UseHealthResult {
   const api = useApi();
   const [health, setHealth] = useState<HealthState>({ kind: "checking" });
   const checkRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let latest: AbortController | undefined;
 
     async function check(): Promise<void> {
+      latest?.abort();
+      const controller = new AbortController();
+      latest = controller;
       try {
         const result = await api.getHealth(controller.signal);
+        if (controller.signal.aborted) {
+          return;
+        }
         setHealth({ kind: result.indexReady ? "ok" : "index_not_ready", health: result });
       } catch (e) {
         if (controller.signal.aborted) {
@@ -52,7 +61,7 @@ export function useHealth(): UseHealthResult {
     const timer = setInterval(checkNow, HEALTH_INTERVAL_MS);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
-      controller.abort();
+      latest?.abort();
       clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };

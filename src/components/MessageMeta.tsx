@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { CopyButton } from "./CopyButton";
 import type { QueryResponse } from "../api/types";
 import { copyText } from "../lib/clipboard";
-import { RETRIEVAL_MODE_NAMES } from "../lib/labels";
+import { retrievalModeName } from "../lib/labels";
 
 interface MessageMetaProps {
   response: QueryResponse;
@@ -25,7 +25,7 @@ export function MessageMeta({ response, totalMs }: MessageMetaProps) {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
-      <Badge label="검색 방식">{RETRIEVAL_MODE_NAMES[retrievalMode]}</Badge>
+      <Badge label="검색 방식">{retrievalModeName(retrievalMode)}</Badge>
       {cacheHit ? <Badge label="캐시에서 꺼낸 응답">캐시</Badge> : null}
       {ms === undefined ? null : (
         <Badge label={latencyMs === null ? "화면에서 잰 전체 시간" : "서버 응답 시간"}>

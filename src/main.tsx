@@ -7,7 +7,7 @@ import { createHttpApiClient } from "./api/httpClient";
 import { createMockApiClient } from "./api/mockClient";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { API_BASE, API_MODE, HEALTH_TIMEOUT_MS } from "./lib/config";
+import { API_BASE, API_MODE, HEALTH_TIMEOUT_MS, QUERY_TIMEOUT_MS } from "./lib/config";
 import { createBrowserStorage } from "./lib/storage";
 import { ApiProvider } from "./providers/ApiProvider";
 import { StorageProvider } from "./providers/StorageProvider";
@@ -15,7 +15,11 @@ import { StorageProvider } from "./providers/StorageProvider";
 // 앱 전체가 쓰는 API 클라이언트 · 저장소는 여기서 한 번만 만든다
 const api: ApiClient =
   API_MODE === "http"
-    ? createHttpApiClient({ baseUrl: API_BASE, healthTimeoutMs: HEALTH_TIMEOUT_MS })
+    ? createHttpApiClient({
+        baseUrl: API_BASE,
+        healthTimeoutMs: HEALTH_TIMEOUT_MS,
+        queryTimeoutMs: QUERY_TIMEOUT_MS,
+      })
     : createMockApiClient();
 const storage = createBrowserStorage();
 

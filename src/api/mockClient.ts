@@ -18,6 +18,7 @@ import {
   type QueryResponse,
   type RetrievalMode,
 } from "./types";
+import { randomUuid } from "../lib/uuid";
 
 /** 목업 응답 속도 */
 export interface MockApiClientOptions {
@@ -84,7 +85,7 @@ export function createMockApiClient(options: Partial<MockApiClientOptions> = {})
   }
 
   function createSession(): Promise<string> {
-    return Promise.resolve(crypto.randomUUID());
+    return Promise.resolve(randomUuid());
   }
 
   async function query(request: QueryRequest, signal?: AbortSignal): Promise<QueryResponse> {
@@ -101,7 +102,7 @@ export function createMockApiClient(options: Partial<MockApiClientOptions> = {})
     turns.set(request.sessionId, turn);
 
     const status = statusOf(request.question);
-    const requestId = `mock-${crypto.randomUUID().slice(0, 8)}`;
+    const requestId = `mock-${randomUuid().slice(0, 8)}`;
     if (status === "error") {
       // 계약 예시(query_error)와 같은 모양
       return {
