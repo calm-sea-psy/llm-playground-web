@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Health
-         * @description 서버가 검색할 준비가 됐는지와 검색 대상 컬렉션.
+         * @description 서버가 검색할 준비가 됐는지와 검색 대상 컬렉션 · Qdrant 위치.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -326,6 +326,11 @@ export interface components {
              * @description BM25 색인에 올린 청크 수
              */
             chunks: number;
+            /**
+             * Qdrant
+             * @description 검색이 붙은 Qdrant 의 위치: local(로컬 Docker) · cloud(Qdrant Cloud). 목업 서버는 null
+             */
+            qdrant?: ("local" | "cloud") | null;
         };
         /**
          * SearchHit
