@@ -1,170 +1,218 @@
-import { QueryError, type ApiClient, type QueryErrorCode } from "./client";
-import { healthSchema, queryResponseSchema, toQueryBody, validationErrorSchema } from "./schemas";
-import type { HealthResponse, QueryRequest, QueryResponse } from "./types";
-import { randomUuid } from "../lib/uuid";
+// 실제 서버(llm-playground-wiki)에 요청하는 ApiClient. 응답 해석은 responses.ts, 이벤트 스트림 해석은 sse.ts 가 한다.
 
-/** 422 에서 틀린 필드 → 오류 코드 */
-const INVALID_FIELD_CODES: Partial<Record<string, QueryErrorCode>> = {
-  question: "invalid_question",
-  retrieval_mode: "invalid_retrieval_mode",
-};
+import { RequestError, type ApiClient } from "./client";
+import type { paths } from "./generated/openapi";
+import { readAskEvent, readAskRejection, readHealth, type HttpResult } from "./responses";
+import { toAskBody } from "./schemas";
+import { createSseParser, type SseMessage } from "./sse";
+import type { AskEnd, AskProgress, AskRequest, HealthResponse } from "./types";
+
+// 경로는 계약 생성 타입(paths)의 키로 적는다. 계약에서 경로가 바뀌면 이 자리에서 타입 오류가 난다
+const PATH_HEALTH: keyof paths = "/health";
+const PATH_ASK: keyof paths = "/ask";
+
+/** /ask 응답의 형식 (계약 text/event-stream) */
+const EVENT_STREAM_TYPE = "text/event-stream";
 
 /** 실제 서버 클라이언트 설정 */
 export interface HttpApiClientOptions {
-  /** API 주소. 빈 문자열이면 같은 주소의 상대 경로(개발 중에는 Vite 프록시) */
+  /** API 주소. 빈 문자열이면 같은 주소의 상대 경로(개발 중에는 Vite 프록시)로 보낸다 */
   baseUrl: string;
-  /** /health 응답 대기 한도 */
-  healthTimeoutMs: number;
-  /** /query 응답 대기 한도. 응답이 오지 않아도 다음 질문을 막지 않게 한다 */
-  queryTimeoutMs: number;
+  /** /health 응답 대기 한도 (ms). 넘으면 network 오류 */
+  readTimeoutMs: number;
+  /** /ask 에서 서버가 아무것도 보내지 않고 이만큼(ms) 지나면 timeout 오류. 받을 때마다 다시 잰다 */
+  streamIdleTimeoutMs: number;
 }
 
-/** 중지 신호에 시간 제한을 더한 신호 */
-interface TimedSignal {
+/** 중지 신호 하나에 호출자의 중지와 대기 한도를 묶는다. AbortSignal.timeout · any 는 구형 브라우저(Safari 17.4 미만 등)에 없어 직접 묶는다 */
+interface Deadline {
   signal: AbortSignal;
-  hasTimedOut: () => boolean;
-  /** 타이머와 구독을 정리한다. 요청이 끝나면 부른다 */
+  /** 대기 한도를 처음부터 다시 잰다 */
+  restart: () => void;
+  /** 대기 한도에 걸려 끊었는지 */
+  isExpired: () => boolean;
+  /** 타이머와 구독을 정리한다 */
   dispose: () => void;
 }
 
-/** RAG Q&A API 서버(/health · /query)에 붙는 클라이언트 */
+function deadline(timeoutMs: number, callerSignal: AbortSignal | undefined): Deadline {
+  const controller = new AbortController();
+  let isExpired = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const abort = (): void => controller.abort();
+  function restart(): void {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      isExpired = true;
+      abort();
+    }, timeoutMs);
+  }
+  restart();
+  callerSignal?.addEventListener("abort", abort, { once: true });
+  if (callerSignal?.aborted) {
+    abort();
+  }
+  return {
+    signal: controller.signal,
+    restart,
+    isExpired: () => isExpired,
+    dispose: () => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", abort);
+    },
+  };
+}
+
+function parseJson(text: string): unknown {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value;
+  } catch {
+    return undefined; // JSON 이 아니다 (빈 본문 · 프록시 오류 페이지). responses.ts 가 HTTP 상태로 판단한다
+  }
+}
+
+/**
+ * 끊긴 요청의 오류. 호출자가 중지했으면 aborted, 대기 한도면 timeout(읽기 요청은 network), 그 밖은 fallback
+ *
+ * @param timeoutCode 대기 한도에 걸렸을 때의 코드
+ */
+function cutError(
+  e: unknown,
+  callerSignal: AbortSignal | undefined,
+  limit: Deadline,
+  timeoutCode: "timeout" | "network",
+  fallback: "network" | "interrupted",
+): RequestError {
+  if (e instanceof RequestError) {
+    return e;
+  }
+  if (callerSignal?.aborted) {
+    return new RequestError("aborted", "중지되었습니다", { cause: e });
+  }
+  if (limit.isExpired()) {
+    return new RequestError(timeoutCode, "응답 대기 한도를 넘었습니다", { cause: e });
+  }
+  // 문구에 주소 · 질문을 넣지 않는다. 이 문구는 로그 서버에 남는다
+  const message =
+    fallback === "network" ? "서버에 연결하지 못했습니다" : "답을 받다가 연결이 끊겼습니다";
+  return new RequestError(fallback, message, { cause: e });
+}
+
+/** 본문을 글로 읽는다. JSON 이 아니면 body 는 undefined */
+async function readResult(res: Response): Promise<HttpResult> {
+  return { status: res.status, body: parseJson(await res.text()) };
+}
+
+/**
+ * 이벤트 스트림 본문을 끝 이벤트까지 읽는다. 진행 이벤트는 받을 때마다 onProgress 로 넘긴다.
+ * 끝 이벤트를 받으면 남은 본문은 읽지 않고 닫는다.
+ *
+ * @throws RequestError data 가 계약과 다름(bad_response), 끝 이벤트 없이 스트림이 끝남(interrupted). 읽기 실패는 그대로 던진다
+ */
+async function readEvents(
+  body: ReadableStream<Uint8Array>,
+  onChunk: () => void,
+  onProgress: (event: AskProgress) => void,
+): Promise<AskEnd> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const parser = createSseParser();
+  // 끝 이벤트면 돌려주고, 진행 이벤트는 넘긴다
+  const handle = (messages: SseMessage[]): AskEnd | undefined => {
+    for (const { event, data } of messages) {
+      const result = readAskEvent(event, parseJson(data));
+      if (result.kind === "end") {
+        return result.end;
+      }
+      if (result.kind === "progress") {
+        onProgress(result.progress);
+      }
+    }
+    return undefined;
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        const end = handle(parser.push(decoder.decode())) ?? handle(parser.end());
+        if (end) {
+          return end;
+        }
+        throw new RequestError("interrupted", "끝 이벤트(done · error) 없이 스트림이 끝났습니다");
+      }
+      onChunk();
+      const end = handle(parser.push(decoder.decode(value, { stream: true })));
+      if (end) {
+        return end;
+      }
+    }
+  } finally {
+    // 끝 이벤트 뒤에 남은 본문 · 실패한 스트림은 더 읽지 않는다. 닫다가 난 오류는 결과와 상관없다
+    reader.cancel().catch(() => undefined);
+  }
+}
+
+/** llm-playground-wiki API(/health · /ask)에 붙는 클라이언트 */
 export function createHttpApiClient({
   baseUrl,
-  healthTimeoutMs,
-  queryTimeoutMs,
+  readTimeoutMs,
+  streamIdleTimeoutMs,
 }: HttpApiClientOptions): ApiClient {
   const root = baseUrl.replace(/\/+$/, "");
 
   async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
-    const timed = withTimeout(signal, healthTimeoutMs);
+    const limit = deadline(readTimeoutMs, signal);
     try {
-      const res = await fetch(`${root}/health`, { signal: timed.signal });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const parsed = healthSchema.safeParse(await res.json());
-      if (!parsed.success) {
-        throw new Error("상태 응답 형식이 맞지 않습니다", { cause: parsed.error });
-      }
-      return parsed.data;
+      return readHealth(
+        await readResult(await fetch(`${root}${PATH_HEALTH}`, { signal: limit.signal })),
+      );
+    } catch (e) {
+      throw cutError(e, signal, limit, "network", "network");
     } finally {
-      timed.dispose();
+      limit.dispose();
     }
   }
 
-  // TODO: 서버 세션(/session · Redis)이 확정되면 POST /session 으로 받는다
-  function createSession(): Promise<string> {
-    return Promise.resolve(randomUuid());
-  }
-
-  async function query(request: QueryRequest, signal?: AbortSignal): Promise<QueryResponse> {
-    const timed = withTimeout(signal, queryTimeoutMs);
-    const fail = (cause: unknown, message: string): QueryError => {
-      if (signal?.aborted) {
-        return new QueryError("aborted", "중지되었습니다", { cause });
-      }
-      if (timed.hasTimedOut()) {
-        return new QueryError("timeout", "응답 시간이 초과되었습니다", { cause });
-      }
-      return new QueryError("network", message, { cause });
+  async function ask(
+    request: AskRequest,
+    onProgress: (event: AskProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<AskEnd> {
+    const limit = deadline(streamIdleTimeoutMs, signal);
+    const url = `${root}${PATH_ASK}?mode=${encodeURIComponent(request.mode)}`;
+    const init: RequestInit = {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: EVENT_STREAM_TYPE },
+      body: JSON.stringify(toAskBody(request)),
+      signal: limit.signal,
     };
-
     try {
       let res: Response;
       try {
-        res = await fetch(`${root}/query`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toQueryBody(request)),
-          signal: timed.signal,
-        });
+        res = await fetch(url, init);
+        if (!res.ok) {
+          throw readAskRejection(await readResult(res));
+        }
       } catch (e) {
-        throw fail(e, "API 서버에 연결할 수 없습니다");
+        throw cutError(e, signal, limit, "timeout", "network");
       }
-
-      let text: string;
+      const type = res.headers.get("Content-Type") ?? "";
+      if (!type.startsWith(EVENT_STREAM_TYPE) || res.body === null) {
+        throw new RequestError(
+          "bad_response",
+          `답변 응답이 이벤트 스트림이 아닙니다 (${type || "형식 없음"})`,
+        );
+      }
       try {
-        text = await res.text();
+        return await readEvents(res.body, limit.restart, onProgress);
       } catch (e) {
-        throw fail(e, "API 서버와의 연결이 끊겼습니다");
+        throw cutError(e, signal, limit, "timeout", "interrupted");
       }
-      return toQueryResponse(res, parseJson(text));
     } finally {
-      timed.dispose();
+      limit.dispose();
     }
   }
 
-  return { getHealth, createSession, query };
-}
-
-/**
- * 받은 본문을 응답으로 바꾼다.
- *
- * @returns 200, 또는 status=error 응답(error_code 별 503 · 502 · 504 · 500)
- * @throws QueryError 422 · 본문 없는 HTTP 오류 · 계약에 맞지 않는 본문
- */
-function toQueryResponse(res: Response, body: unknown): QueryResponse {
-  const parsed = queryResponseSchema.safeParse(body);
-  if (parsed.success) {
-    return parsed.data;
-  }
-  if (res.status === 422) {
-    throw new QueryError(invalidCodeOf(body), "요청이 검증에서 거절되었습니다 (HTTP 422)", {
-      cause: body,
-    });
-  }
-  if (!res.ok && body === undefined) {
-    // JSON 본문 없는 HTTP 오류 = 백엔드에 닿지 못함 (프록시 5xx 등)
-    throw new QueryError("network", `API 서버에 연결할 수 없습니다 (HTTP ${res.status})`);
-  }
-  // 서버가 답했지만 계약 모양이 아니다 (불변식 위반 포함). 상태 코드와 상관없이 형식 오류
-  throw new QueryError("bad_response", `응답 형식이 맞지 않습니다 (HTTP ${res.status})`, {
-    cause: parsed.error,
-  });
-}
-
-/** 본문이 JSON 이 아니면(프록시 오류 페이지 · 빈 본문 등) undefined */
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}
-
-/** 422 본문(FastAPI detail)에서 처음 틀린 필드로 코드를 고른다 */
-function invalidCodeOf(body: unknown): QueryErrorCode {
-  const parsed = validationErrorSchema.safeParse(body);
-  const field = parsed.success ? parsed.data.detail[0]?.loc.at(-1) : undefined;
-  const isKnownField = typeof field === "string" && Object.hasOwn(INVALID_FIELD_CODES, field);
-  return (isKnownField && INVALID_FIELD_CODES[field]) || "invalid_request";
-}
-
-/**
- * 시간 제한을 더한 신호를 만든다.
- * AbortSignal.any 가 없는 브라우저(Safari 17.3 · Firefox 123 · Chrome 115 이하)에서도 돌도록 직접 잇는다.
- */
-function withTimeout(outer: AbortSignal | undefined, timeoutMs: number): TimedSignal {
-  const controller = new AbortController();
-  let isTimedOut = false;
-  const handleOuterAbort = (): void => controller.abort(outer?.reason);
-  const timer = setTimeout(() => {
-    isTimedOut = true;
-    controller.abort(new Error("응답 시간 초과"));
-  }, timeoutMs);
-
-  if (outer?.aborted) {
-    handleOuterAbort();
-  } else {
-    outer?.addEventListener("abort", handleOuterAbort, { once: true });
-  }
-
-  return {
-    signal: controller.signal,
-    hasTimedOut: () => isTimedOut,
-    dispose: () => {
-      clearTimeout(timer);
-      outer?.removeEventListener("abort", handleOuterAbort);
-    },
-  };
+  return { getHealth, ask };
 }

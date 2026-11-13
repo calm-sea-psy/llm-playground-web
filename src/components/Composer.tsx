@@ -1,10 +1,28 @@
-import { useId, useLayoutEffect, useRef, type KeyboardEvent, type RefObject } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 
-import { charCount } from "../lib/chat";
-import { COMPOSER_MAX_HEIGHT_PX, MAX_INPUT_LENGTH } from "../lib/config";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import { MAX_QUESTION_LENGTH } from "../lib/config";
 
 /** IME 합성 중 keydown 의 keyCode (일부 브라우저는 isComposing 대신 이것만 준다) */
 const IME_KEY_CODE = 229;
+
+/** 터치가 주 입력인 기기. 화면 키보드에는 Shift+Enter 가 없어 Enter 를 줄바꿈으로 둔다 */
+const TOUCH_QUERY = "(pointer: coarse)";
+
+const PLACEHOLDER = "질문을 입력하세요";
+
+const KEYBOARD_HINT = "Enter 전송 · Shift+Enter 줄바꿈";
+const TOUCH_HINT = "Enter 줄바꿈 · 전송 버튼으로 보내기";
+
+/** 입력창 최대 높이. 넘으면 입력창 안에서 스크롤한다 */
+const MAX_HEIGHT_PX = 200;
 
 interface ComposerProps {
   value: string;
@@ -12,46 +30,76 @@ interface ComposerProps {
   /** 보낸다. 실제로 보냈으면 true (입력창을 비운다) */
   onSend: (text: string) => boolean;
   onStop: () => void;
-  /** 이 대화에서 답변을 받는 중 (전송 버튼 → 중지 버튼) */
+  /** 답변을 받는 중 (전송 버튼 → 중지 버튼) */
   isBusy: boolean;
-  /** 다른 대화에서 답변을 받는 중 (요청은 한 번에 하나 → 전송을 막고 안내) */
-  isBlocked?: boolean;
-  /** 입력창 (보낸 뒤 · 새 질문 때 포커스용) */
+  /** 보낼 수 없는 때 (다른 대화가 답변을 받는 중 등) */
+  isDisabled?: boolean;
+  /** 입력창 (예시 질문을 채운 뒤 포커스용) */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
-  /** 빈 입력창 안내. 없으면 기본 문구 */
-  placeholder?: string;
+  /** 입력창 아래 안내 (지금 보낼 수 없는 이유 등). 없으면 키 사용법 */
+  hint?: string;
+  /** 쓰던 글을 다른 글로 바꾼 직후 되돌린다. 있으면 입력창 아래 안내 대신 실행 취소 버튼을 보여 준다 */
+  onUndoReplace?: () => void;
 }
 
-/** 질문 입력: 자동 높이 textarea · Enter 전송(한글 IME 합성 중 제외) · 전송/중지 */
+/** 내용에 맞춰 입력창 높이를 맞춘다. MAX_HEIGHT_PX 를 넘으면 그 높이에서 입력창 안을 스크롤한다 */
+function fitHeight(ref: RefObject<HTMLTextAreaElement | null>): void {
+  const el = ref.current;
+  if (!el) {
+    return;
+  }
+  el.style.height = "auto";
+  el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
+  el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden";
+}
+
+/**
+ * 질문 입력: 자동 높이 · Enter 전송(한글 IME 합성 중 제외, 터치 기기는 줄바꿈) · 전송/중지.
+ * 계약 한도(MAX_QUESTION_LENGTH)를 넘는 글자는 입력되지 않는다.
+ */
 export function Composer({
   value,
   onChange,
   onSend,
   onStop,
   isBusy,
-  isBlocked = false,
+  isDisabled = false,
   inputRef,
-  placeholder = "질문을 입력하세요",
+  hint,
+  onUndoReplace,
 }: ComposerProps) {
+  const isTouch = useMediaQuery(TOUCH_QUERY, false);
   const countId = useId();
   const localRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = inputRef ?? localRef;
   /** Safari 는 compositionend 가 keydown 보다 먼저 와서 합성을 끝낸 Enter 가 isComposing=false 로 들어온다 */
   const justComposedRef = useRef(false);
-
-  const count = charCount(value.trim());
-  const isTooLong = count > MAX_INPUT_LENGTH;
-  const canSend = !isBusy && !isBlocked && count > 0 && !isTooLong;
+  const canSend = !isBusy && !isDisabled && value.trim() !== "";
+  const keyHint = isTouch ? TOUCH_HINT : KEYBOARD_HINT;
+  // 입력창 아래 안내. 보낼 수 없는 이유(hint)는 늘 보이고, 키 사용법은 실행 취소 안내가 있으면 자리를 내준다
+  const baseHint = hint ?? (onUndoReplace ? undefined : keyHint);
 
   useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el) {
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`;
-    el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT_PX ? "auto" : "hidden";
+    fitHeight(textareaRef);
   }, [value, textareaRef]);
+
+  // 너비가 바뀌면 줄 수가 달라지므로 높이를 다시 맞춘다 (창 크기 변경 · 화면 회전 · 숨긴 창에서 열었다가 보일 때)
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      // 높이를 바꿔도 이 콜백이 불리므로 너비가 바뀐 때만 맞춘다
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        fitHeight(textareaRef);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [textareaRef]);
 
   function submit(): void {
     if (canSend && onSend(value)) {
@@ -60,7 +108,7 @@ export function Composer({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
-    if (e.key !== "Enter" || e.shiftKey) {
+    if (e.key !== "Enter" || e.shiftKey || isTouch) {
       return;
     }
     if (e.nativeEvent.isComposing || e.keyCode === IME_KEY_CODE || justComposedRef.current) {
@@ -93,10 +141,10 @@ export function Composer({
           onKeyDown={handleKeyDown}
           onCompositionEnd={handleCompositionEnd}
           rows={1}
-          placeholder={placeholder}
+          maxLength={MAX_QUESTION_LENGTH}
+          placeholder={PLACEHOLDER}
           aria-label="질문 입력"
           aria-describedby={countId}
-          aria-invalid={isTooLong || undefined}
           className="min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-zinc-400"
         />
         {isBusy ? (
@@ -120,22 +168,23 @@ export function Composer({
         )}
       </div>
       <div className="mt-1.5 flex justify-between gap-4 px-2 text-xs text-zinc-500">
-        {isBlocked ? (
-          <span className="text-amber-700 dark:text-amber-400" role="status">
-            다른 질문의 답변을 받는 중입니다. 끝나면 보낼 수 있습니다.
-          </span>
-        ) : (
-          <span>
-            같은 대화의 질문은 앞 내용을 이어서 답합니다
-            <span className="hidden sm:inline"> (새 대화는 + 새 질문) · Shift+Enter 줄바꿈</span>
-          </span>
-        )}
-        <span
-          id={countId}
-          className={`shrink-0 tabular-nums ${isTooLong ? "font-medium text-red-600 dark:text-red-400" : ""}`}
-        >
-          {count.toLocaleString()} / {MAX_INPUT_LENGTH.toLocaleString()}
-          {isTooLong ? <span role="alert"> · 너무 깁니다</span> : null}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          {baseHint !== undefined ? <span>{baseHint}</span> : null}
+          {onUndoReplace ? (
+            <span role="status" className="flex min-w-0 items-center gap-2">
+              <span className="truncate">입력하던 글을 바꿨습니다</span>
+              <button
+                type="button"
+                onClick={onUndoReplace}
+                className="shrink-0 font-medium text-zinc-700 underline underline-offset-2 dark:text-zinc-300"
+              >
+                실행 취소
+              </button>
+            </span>
+          ) : null}
+        </div>
+        <span id={countId} className="shrink-0 tabular-nums">
+          {value.length} / {MAX_QUESTION_LENGTH}
         </span>
       </div>
     </form>

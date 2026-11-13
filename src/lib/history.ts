@@ -1,166 +1,184 @@
-// 질문 내역 저장 (브라우저 저장소). 저장 API 가 없어 브라우저에만 남는다.
-// 모든 읽기 · 쓰기는 try/catch — 저장이 안 되는 환경(시크릿 창 · 차단 · 용량 초과)에서도 화면은 동작한다.
-// 저장 형식은 화면 형식(camelCase) 그대로다.
+// 대화 목록 저장 (브라우저 저장소). 서버는 대화를 기억하지 않아, 화면이 보던 내용을 브라우저에만 남긴다.
+// 읽기 · 쓰기는 storage.ts 의 readItem · writeItem 으로 감싸 저장할 수 없는 환경(시크릿 창 · 차단)에서도 화면이 동작한다.
+// 목록 저장만 용량 초과 때 줄여서 다시 쓰려고 예외를 직접 잡는다.
+// 저장 형식은 화면 형식(lib/chat.ts) 그대로다.
 
 import { z } from "zod";
 
-import {
-  isReceiving,
-  MESSAGE_ROLES,
-  MESSAGE_STATUSES,
-  type Conversation,
-  type Message,
-} from "./chat";
+import { hasPendingAnswer, type Answer, type Conversation, type Message } from "./chat";
+import { CURRENT_STORAGE_KEY, HISTORY_STORAGE_KEY, MAX_CONVERSATIONS } from "./config";
 import { logWarning } from "./logger";
-import type { KeyValueStorage } from "./storage";
-import { ANSWER_STATUSES, RETRIEVAL_MODES, type QueryResponse } from "../api/types";
+import { readItem, writeItem, type KeyValueStorage } from "./storage";
+import { REQUEST_ERROR_CODES } from "../api/client";
+import { ASK_MODES } from "../api/types";
 
-/** 질문 내역 저장 키 */
-export const HISTORY_KEY = "llm-playground:conversations:v1";
-/** 마지막으로 보던 대화 저장 키 */
-export const CURRENT_KEY = "llm-playground:current:v1";
-/** 저장본 안의 형식 버전. 저장 모양이 바뀌면 올린다 (다른 버전 저장본은 빈 내역으로 본다) */
-export const HISTORY_VERSION = 3; // 3: 계약 QueryResponse(error_code · meta) + 세션 id. 1 · 2 는 이전 형식
+/** 저장본 형식 버전. 저장 모양이 바뀌면 올린다 (다른 버전 저장본은 빈 목록으로 본다) */
+const HISTORY_VERSION = 2;
 
-/** 보관 한도 (최신순). 대화 하나는 메타까지 수 KB → localStorage 한도(약 5MB) 안에 넉넉하다 */
-export const MAX_CONVERSATIONS = 200;
-
-/** 용량이 넘칠 때 한 번에 남기는 비율 (오래된 20% 를 버리고 다시) */
+/** 용량이 넘칠 때 남기는 비율 (오래된 20% 를 버리고 다시 쓴다) */
 const SHRINK_RATIO = 0.8;
 
-/** 불러온 내역 */
+/** 저장소 용량 초과 예외 이름. NS_ERROR_DOM_QUOTA_REACHED 는 구버전 Firefox 가 쓴다 */
+const QUOTA_ERROR_NAMES: readonly string[] = ["QuotaExceededError", "NS_ERROR_DOM_QUOTA_REACHED"];
+
+/** 저장 결과. trimmed 는 보관 한도(대화 수 MAX_CONVERSATIONS · 저장소 용량)를 넘어 오래된 대화 일부를 저장본에서 뺀 경우다 */
+export type SaveResult = "saved" | "trimmed" | "failed";
+
+/** 불러온 대화 목록 */
 export interface LoadedHistory {
+  /** 최신 활동순 */
   conversations: Conversation[];
-  /** 마지막으로 보던 대화. 없거나 지워졌으면 undefined */
+  /**
+   * 보고 있던 대화. 없으면 새 대화 화면.
+   * 목록에 없는 id 일 수 있다 (목록 저장에 실패한 경우) — 화면은 새 대화로 연다
+   */
   currentId: string | undefined;
 }
 
-const answerErrorSchema = z.object({ code: z.string(), message: z.string() });
-
-/** 화면 형식(camelCase) 그대로 저장한 QueryResponse */
-const storedQueryResponseSchema: z.ZodType<QueryResponse> = z.object({
-  requestId: z.string(),
-  status: z.enum(ANSWER_STATUSES),
-  answer: z.string(),
-  reason: z.string(),
-  citations: z.array(
-    z.object({ sourceId: z.string(), bookId: z.string(), fileName: z.string(), page: z.number() }),
+const answerSchema: z.ZodType<Answer> = z.object({
+  text: z.string(),
+  sources: z.array(
+    z.object({
+      number: z.number(),
+      title: z.string(),
+      section: z.string(),
+      url: z.string(),
+      score: z.number(),
+    }),
   ),
-  errorCode: z.string().nullable(),
-  meta: z.object({
-    retrievalMode: z.string(),
-    latencyMs: z.number().nullable(),
-    inputTokens: z.number().nullable(),
-    outputTokens: z.number().nullable(),
-    cacheHit: z.boolean(),
-    traceId: z.string().nullable(),
-  }),
+  stage: z.object({ name: z.string(), message: z.string() }).nullable(),
 });
 
-const messageSchema = z
-  .object({
-    id: z.string(),
-    role: z.enum(MESSAGE_ROLES),
-    content: z.string(),
-    status: z.enum(MESSAGE_STATUSES),
-    createdAt: z.number(),
-    retrievalMode: z.enum(RETRIEVAL_MODES).optional().catch(undefined),
-    // 응답은 렌더링이 그대로 읽는 값이라 전체 모양을 검증한다 (틀리면 렌더 중 예외). 맞지 않으면 그 응답만 버린다
-    response: storedQueryResponseSchema.optional().catch(undefined),
-    error: answerErrorSchema.optional().catch(undefined),
-    finishedAt: z.number().optional().catch(undefined),
-  })
-  .transform((m): Message => ({
-    ...withoutUndefined(m),
-    // 받는 도중 탭이 닫혔던 답변
-    status: m.status === "pending" ? "stopped" : m.status,
-  }));
+const answerBase = {
+  id: z.string(),
+  role: z.literal("assistant"),
+  question: z.string(),
+  mode: z.enum(ASK_MODES),
+  answer: answerSchema,
+};
 
-const conversationSchema: z.ZodType<Conversation> = z
-  .object({
-    id: z.string(),
-    title: z.string(),
-    createdAt: z.number(),
-    updatedAt: z.number(),
-    sessionId: z.string().optional().catch(undefined),
-    messages: z.array(messageSchema),
-  })
-  .transform((c): Conversation => withoutUndefined(c));
-
-/**
- * 저장된 내역을 불러온다. 깨진 대화는 버리고 나머지는 살린다.
- * 받는 도중 탭이 닫혀 pending 으로 남은 답변은 stopped 로 바꾼다.
- */
-export function loadHistory(storage: KeyValueStorage): LoadedHistory {
-  let raw: string | null;
-  let current: string | null;
-  try {
-    raw = storage.getItem(HISTORY_KEY);
-    current = storage.getItem(CURRENT_KEY);
-  } catch (e) {
-    logWarning("질문 내역을 읽지 못했다", e);
-    return { conversations: [], currentId: undefined };
-  }
-
-  const conversations = sortByRecent(
-    readList(raw).flatMap((value) => {
-      const parsed = conversationSchema.safeParse(value);
-      return parsed.success ? [parsed.data] : [];
+const messageSchema: z.ZodType<Message> = z
+  .union([
+    z.object({ id: z.string(), role: z.literal("user"), text: z.string() }),
+    z.object({ ...answerBase, state: z.literal("pending") }),
+    z.object({ ...answerBase, state: z.literal("stopped") }),
+    z.object({
+      ...answerBase,
+      state: z.literal("done"),
+      cited: z.array(z.number()),
+      cut: z.enum(["failed", "timed_out", "truncated"]).nullable(),
     }),
+    z.object({ ...answerBase, state: z.literal("error"), code: z.string(), message: z.string() }),
+    z.object({
+      ...answerBase,
+      state: z.literal("failed"),
+      failure: z.enum(REQUEST_ERROR_CODES).exclude(["aborted"]),
+    }),
+  ])
+  // 받는 도중 탭이 닫혀 pending 으로 남은 답변은 중지된 것으로 본다
+  .transform((m): Message =>
+    m.role === "assistant" && m.state === "pending" ? { ...m, state: "stopped" } : m,
   );
-  const currentId = conversations.find((c) => c.id === current)?.id;
+
+// 메시지는 하나씩 검증한다 (readConversation). 하나가 깨졌다고 대화 전체를 버리지 않는다
+const conversationSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  updatedAt: z.number(),
+  messages: z.array(z.unknown()),
+});
+
+/** 저장본의 대화 하나. 깨진 메시지는 빼고, 남은 메시지가 없으면 대화를 버린다 */
+function readConversation(value: unknown): Conversation[] {
+  const parsed = conversationSchema.safeParse(value);
+  if (!parsed.success) {
+    return [];
+  }
+  const messages = parsed.data.messages.flatMap((item) => {
+    const message = messageSchema.safeParse(item);
+    return message.success ? [message.data] : [];
+  });
+  if (messages.length < parsed.data.messages.length) {
+    logWarning(`깨진 메시지 ${parsed.data.messages.length - messages.length}개를 버렸다`);
+  }
+  return messages.length > 0 ? [{ ...parsed.data, messages }] : [];
+}
+
+/** 저장본의 대화 목록. 저장본이 없거나 깨졌거나 다른 버전이면 undefined */
+function readList(raw: string | null): unknown[] | undefined {
+  if (raw === null) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    logWarning("대화 목록 저장본이 깨져 있어 버린다", e);
+    return undefined;
+  }
+  return isObject(parsed) &&
+    parsed.version === HISTORY_VERSION &&
+    Array.isArray(parsed.conversations)
+    ? parsed.conversations
+    : undefined;
+}
+
+function readConversations(list: unknown[]): Conversation[] {
+  const conversations = sortByRecent(list.flatMap(readConversation));
+  if (conversations.length < list.length) {
+    logWarning(`깨진 대화 ${list.length - conversations.length}개를 버렸다`);
+  }
+  return conversations;
+}
+
+function isQuotaError(e: unknown): boolean {
+  return e instanceof DOMException && QUOTA_ERROR_NAMES.includes(e.name);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** 저장된 대화 목록을 불러온다. 깨진 대화 · 메시지는 버리고 나머지는 살린다 */
+export function loadHistory(storage: KeyValueStorage): LoadedHistory {
+  const raw = readItem(storage, HISTORY_STORAGE_KEY, "대화 목록");
+  const current = readItem(storage, CURRENT_STORAGE_KEY, "보고 있던 대화");
+  const conversations = readConversations(readList(raw) ?? []);
+  const currentId = current !== null && current !== "" ? current : undefined;
   return { conversations, currentId };
 }
 
 /**
- * 내역을 저장한다 (최신순 최대 MAX_CONVERSATIONS 개). 용량이 넘치면 오래된 대화부터 줄여 다시 시도한다.
+ * 대화 목록을 저장한다 (최신순 최대 MAX_CONVERSATIONS 개). 용량이 넘치면 오래된 대화부터 줄여 다시 쓴다.
  *
- * @returns 저장했으면 true (일부를 줄였어도 true), 저장할 수 없으면 false
+ * @returns 그대로 저장했으면 saved, 대화 수 · 용량 한도로 일부를 뺐으면 trimmed, 저장할 수 없으면 failed
  */
-export function saveHistory(storage: KeyValueStorage, conversations: Conversation[]): boolean {
+export function saveHistory(storage: KeyValueStorage, conversations: Conversation[]): SaveResult {
   let keep = sortByRecent(conversations).slice(0, MAX_CONVERSATIONS);
+  // 한도를 넘은 대화는 저장본에 없어 새로고침하면 사라지므로 알린다
+  let result: SaveResult = keep.length < conversations.length ? "trimmed" : "saved";
   for (;;) {
     try {
       storage.setItem(
-        HISTORY_KEY,
+        HISTORY_STORAGE_KEY,
         JSON.stringify({ version: HISTORY_VERSION, conversations: keep }),
       );
-      return true;
+      return result;
     } catch (e) {
       if (!isQuotaError(e) || keep.length <= 1) {
-        logWarning("질문 내역을 저장하지 못했다", e);
-        return false;
+        logWarning("대화 목록을 저장하지 못했다", e);
+        return "failed";
       }
       keep = keep.slice(0, Math.floor(keep.length * SHRINK_RATIO));
+      result = "trimmed";
     }
   }
 }
 
-/** 마지막으로 보던 대화를 남긴다 (새로고침하면 다시 연다). 없으면 새 질문 화면 */
+/** 보고 있는 대화를 남긴다 (새로고침하면 다시 연다). 없으면 새 대화 화면 */
 export function saveCurrentId(storage: KeyValueStorage, id: string | undefined): void {
-  try {
-    if (id) {
-      storage.setItem(CURRENT_KEY, id);
-    } else {
-      storage.removeItem(CURRENT_KEY);
-    }
-  } catch (e) {
-    logWarning("마지막으로 보던 대화를 저장하지 못했다", e); // 화면은 그대로 동작한다
-  }
-}
-
-/**
- * 다른 탭이 저장한 대화를 이 탭 내역에 반영한다. 저장본이 기준이라 다른 탭에서 지운 대화는 여기서도 사라진다.
- * 이 탭이 답변을 받는 중인 대화만 이 탭 것을 남긴다.
- *
- * @returns 보던 대화가 사라졌으면 currentId 는 undefined (새 질문 화면)
- */
-export function mergeSavedHistory(local: LoadedHistory, saved: Conversation[]): LoadedHistory {
-  const receiving = local.conversations.filter((c) => c.messages.some(isReceiving));
-  const receivingIds = new Set(receiving.map((c) => c.id));
-  const conversations = [...receiving, ...saved.filter((c) => !receivingIds.has(c.id))];
-  const hasCurrent = conversations.some((c) => c.id === local.currentId);
-  return { conversations, currentId: hasCurrent ? local.currentId : undefined };
+  // 못 남겨도 새로고침하면 새 대화 화면으로 열릴 뿐이다
+  writeItem(storage, CURRENT_STORAGE_KEY, id, "보고 있는 대화");
 }
 
 /** 최신 활동순으로 정렬한 새 배열 */
@@ -168,33 +186,40 @@ export function sortByRecent(conversations: Conversation[]): Conversation[] {
   return [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-function readList(raw: string | null): unknown[] {
-  if (raw === null) {
-    return [];
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    logWarning("질문 내역 저장본이 깨져 있어 버린다", e);
-    return [];
-  }
-  return isObject(parsed) &&
-    parsed.version === HISTORY_VERSION &&
-    Array.isArray(parsed.conversations)
-    ? parsed.conversations
-    : [];
+/**
+ * 다른 탭이 저장한 목록을 이 탭의 목록에 합친다 (저장할 때 서로의 대화를 덮어쓰지 않게).
+ * - 양쪽에 다 있는 대화는 더 최근에 바뀐 쪽을 쓴다. 같으면 이 탭 것을 쓴다 (받는 중인 답변이 저장본에는 중지로 읽힌다)
+ * - 저장본에 없는 대화는 다른 탭이 지운 것으로 보고 뺀다. 이 탭에서 답변을 받는 중인 대화는 남긴다
+ * - 보고 있던 대화가 빠지면 새 대화 화면으로 돌린다
+ *
+ * @param isUnsaved 이 탭이 마지막 저장에 실패했다. 저장본에 없는 대화가 이 탭에서만 있는(저장하지 못한) 대화일 수 있어 빼지 않는다
+ */
+export function mergeFromOtherTab(
+  local: LoadedHistory,
+  stored: Conversation[],
+  isUnsaved = false,
+): LoadedHistory {
+  const localById = new Map(local.conversations.map((c) => [c.id, c]));
+  const storedIds = new Set(stored.map((c) => c.id));
+  const merged = stored.map((theirs) => {
+    const mine = localById.get(theirs.id);
+    return mine !== undefined && mine.updatedAt >= theirs.updatedAt ? mine : theirs;
+  });
+  const kept = local.conversations.filter(
+    (c) => !storedIds.has(c.id) && (isUnsaved || hasPendingAnswer(c.messages)),
+  );
+  const conversations = sortByRecent([...kept, ...merged]);
+  // 목록에 없던 보고 있던 대화(이 탭이 저장하지 못한 대화 등)는 건드리지 않는다
+  const isCurrentListed = localById.has(local.currentId ?? "");
+  const isGone = isCurrentListed && !conversations.some((c) => c.id === local.currentId);
+  return { conversations, currentId: isGone ? undefined : local.currentId };
 }
 
-/** 값이 undefined 인 선택 필드를 빼서, 저장본과 같은 모양을 유지한다 */
-function withoutUndefined<T extends object>(value: T): T {
-  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
-}
-
-function isQuotaError(e: unknown): boolean {
-  return e instanceof DOMException && (e.name === "QuotaExceededError" || e.code === 22);
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+/**
+ * 저장 직전에 저장본을 다시 읽어 합친다. 저장은 목록 전체를 덮어쓰므로, 다른 탭의 변경을 받기 전에 저장해도 그 변경을 지우지 않게 한다.
+ * 저장본이 없거나 읽을 수 없으면 그대로 돌려준다 (빈 목록과 합치면 이 탭의 대화를 지운 것으로 보게 된다)
+ */
+export function mergeStoredHistory(storage: KeyValueStorage, local: LoadedHistory): LoadedHistory {
+  const list = readList(readItem(storage, HISTORY_STORAGE_KEY, "대화 목록"));
+  return list === undefined ? local : mergeFromOtherTab(local, readConversations(list));
 }

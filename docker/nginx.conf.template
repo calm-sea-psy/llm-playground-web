@@ -1,32 +1,71 @@
-# ${BACKEND_URL} 은 컨테이너 시작 때 환경변수로 채워진다 (nginx 이미지의 envsubst).
+# 빌드한 정적 파일을 내려주고, wiki 계약 경로(/health · /ask · /search)는 BACKEND_URL 로, 화면 로그(/client-logs)는 log-server 로 넘긴다.
+# ${BACKEND_URL} 은 컨테이너를 시작할 때 nginx 이미지가 환경 변수로 채운다 (templates/*.template → conf.d, envsubst).
+# 정해 둔 환경 변수만 바꾸므로 $uri 같은 nginx 변수는 그대로 남는다.
+
+# 화면 로그 입구는 인증 없이 열려 있어 IP 마다 요청 수를 제한한다 (zone 은 server 밖에서만 선언할 수 있다).
+# Docker Desktop 처럼 포트 전달로 들어오면 모든 요청이 게이트웨이 IP 로 보여 사용자 전체에 대한 제한이 된다
+limit_req_zone $binary_remote_addr zone=client_logs:1m rate=5r/s;
+
 server {
     listen 80;
-    server_name _;
     root /usr/share/nginx/html;
-    index index.html;
 
-    # API: 같은 주소로 받아 백엔드로 넘긴다. 백엔드가 꺼져 있으면 502 → 화면은 "연결 안 됨"
+    # 기본 보안 헤더 (nginx-security-headers.conf). add_header 를 따로 쓰는 location(/assets/ · /)도 다시 include 한다
+    include /etc/nginx/snippets/security-headers.conf;
+
+    # 빌드 결과를 압축해 내려준다 (nginx 기본값은 꺼짐). 프록시한 API 응답은 압축하지 않는다 (gzip_proxied 기본값 off)
+    gzip on;
+    gzip_types text/css text/javascript application/javascript image/svg+xml;
+    gzip_min_length 1024;
+    gzip_vary on;
+
+    # log-server 는 Docker 내장 DNS 로 요청 때마다 찾는다. 늦게 뜨거나 다시 떠도 nginx 를 다시 시작하지 않아도 된다
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $log_server_upstream http://log-server:3001;
+
+    # 계약 경로만 넘긴다 (vite.config.ts 의 개발 서버 프록시와 같은 경로). wiki 가 꺼져 있으면 502 → 화면은 "연결 안 됨"
     location = /health {
         proxy_pass ${BACKEND_URL};
         proxy_connect_timeout 5s;
     }
 
-    location = /query {
+    # 답변 이벤트 스트림(text/event-stream). 조각을 모아 두지 않고 받는 대로 흘려보낸다
+    location = /ask {
         proxy_pass ${BACKEND_URL};
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        # 검색 · 리랭킹 · 모델 호출이 길어질 수 있다 (계약 예시의 model_timeout 이 30초)
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        # 이벤트 사이를 이만큼까지 기다린다. wiki 의 단계 시간 제한(60초)보다 넉넉하고,
+        # 화면의 대기 한도(STREAM_IDLE_TIMEOUT_MS 130초)보다 짧아 nginx 가 먼저 끊는다
         proxy_read_timeout 120s;
     }
 
-    # 빌드 파일 이름에 해시가 붙어 오래 캐시해도 된다
-    location /assets/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
+    location = /search {
+        proxy_pass ${BACKEND_URL};
+        proxy_read_timeout 60s;
     }
 
-    # 화면 진입점은 캐시하지 않는다 (새 빌드가 바로 보이게)
+    # 화면 로그. 개발 서버는 콘솔에만 남기므로 vite.config.ts 프록시에는 없다.
+    # log-server 가 꺼져 있으면 502 만 돌아가고, 화면은 이 실패를 무시한다
+    location = /client-logs {
+        limit_req zone=client_logs burst=20 nodelay;
+        limit_req_status 429;
+        client_max_body_size 16k;
+        proxy_connect_timeout 2s;
+        proxy_pass $log_server_upstream;
+    }
+
+    # 파일 이름에 내용 해시가 붙은 빌드 결과는 오래 캐시한다
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        include /etc/nginx/snippets/security-headers.conf;
+    }
+
+    # 그 밖의 주소는 화면(index.html)으로 돌려준다. 새로고침하거나 다른 주소로 바로 들어와도 열린다
     location / {
-        add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache";
+        include /etc/nginx/snippets/security-headers.conf;
     }
 }

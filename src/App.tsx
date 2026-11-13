@@ -1,30 +1,34 @@
 import { useCallback, useRef, useState } from "react";
 
-import { RETRIEVAL_MODES, type RetrievalMode } from "./api/types";
+import type { AskMode } from "./api/types";
+import { AskModeSelect } from "./components/AskModeSelect";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { RetrievalModeSelect } from "./components/RetrievalModeSelect";
+import { SealMascot } from "./components/seal/SealMascot";
 import { Sidebar } from "./components/Sidebar";
 import { SidebarDrawer } from "./components/SidebarDrawer";
 import { ThemeSelect } from "./components/ThemeSelect";
-import { useAnnouncer } from "./hooks/useAnnouncer";
 import { useChat } from "./hooks/useChat";
+import { useDraft } from "./hooks/useDraft";
 import { useDrawer } from "./hooks/useDrawer";
 import { useHealth } from "./hooks/useHealth";
 import { useTheme } from "./hooks/useTheme";
-import { isAwaitingClarification } from "./lib/chat";
-import { DEFAULT_RETRIEVAL_MODE } from "./lib/config";
+import { DEFAULT_ASK_MODE } from "./lib/config";
 
-/** 마지막 답이 확인 질문일 때 입력창 안내 */
-const CLARIFY_PLACEHOLDER = "확인 질문에 답하거나 빠진 조건을 넣어 주세요";
+/** 화면 제목 (index.html 의 title 과 같다) */
+const APP_TITLE = "위키백과 Q&A";
 
-/** RAG Q&A 화면: 사이드바(질문 내역 · 서버 상태) + 대화 + 입력창 */
+/** 다른 대화가 답변을 받는 동안 입력창 아래 안내 (요청은 한 번에 하나) */
+const BUSY_ELSEWHERE_HINT = "다른 대화의 답변을 받는 중입니다. 끝나면 보낼 수 있습니다";
+
+/** 새 대화 화면의 입력 초안 키 (대화 id 는 UUID 라 겹치지 않는다) */
+const NEW_CHAT_DRAFT_KEY = "new";
+
+/** 위키 Q&A 화면: 사이드바(새 대화 · 대화 목록 · 서버 상태) + 머리줄(답변 방식 · 테마) + 대화 + 입력창 */
 export function App() {
   const { health, recheck } = useHealth();
-  // 질문이 서버 쪽 문제로 실패하면 서버 상태도 바로 다시 확인한다 (사이드바 표시와 맞추려고)
   const chat = useChat({ onServerTrouble: recheck });
-  const { select: selectConversation } = chat;
   const { theme, setTheme } = useTheme();
   const {
     isDrawer,
@@ -34,25 +38,33 @@ export function App() {
     panelRef,
     triggerRef,
   } = useDrawer();
-  const { message: announcement, announce } = useAnnouncer();
-  const [draft, setDraft] = useState("");
-  const [chosenMode, setChosenMode] = useState<RetrievalMode>(DEFAULT_RETRIEVAL_MODE);
+  const { draft, setDraft, replaceDraft, canUndoReplace, undoReplace } = useDraft(
+    chat.currentId ?? NEW_CHAT_DRAFT_KEY,
+  );
+  const [mode, setMode] = useState<AskMode>(DEFAULT_ASK_MODE);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // 서버가 지원 방식(supported_modes)을 알려 주면 그 안에서만 고른다. 고른 방식이 빠졌으면 첫 방식으로
-  const serverModes = "health" in health ? health.health.supportedModes : [];
-  const modes: readonly RetrievalMode[] = serverModes.length > 0 ? serverModes : RETRIEVAL_MODES;
-  const retrievalMode = modes.includes(chosenMode)
-    ? chosenMode
-    : (modes[0] ?? DEFAULT_RETRIEVAL_MODE);
-  const isClarifying = isAwaitingClarification(chat.messages);
-  // 요청은 한 번에 하나: 보고 있는 대화가 받는 중이면 중지 버튼, 다른 대화가 받는 중이면 전송을 막는다
+  // 요청은 한 번에 하나: 보고 있는 대화가 받는 중이면 중지 버튼, 다른 대화가 받는 중이면 보내지 않는다
   const isBusyHere = chat.isBusy && chat.activeId === chat.currentId;
   const isBusyElsewhere = chat.isBusy && !isBusyHere;
 
+  // memo 된 대화 화면에 넘기므로 렌더마다 새로 만들지 않는다. 예시 질문으로 입력창을 바꾼다
+  // (쓰던 글이 있었으면 입력창 아래 실행 취소로 살린다)
+  const handlePickExample = useCallback(
+    (text: string) => {
+      replaceDraft(text);
+      inputRef.current?.focus();
+    },
+    [replaceDraft],
+  );
+
+  function handleUndoReplace(): void {
+    undoReplace();
+    inputRef.current?.focus();
+  }
+
   function handleNewChat(): void {
     chat.newChat();
-    setDraft("");
     if (isDrawer) {
       closeDrawer();
     } else {
@@ -60,24 +72,17 @@ export function App() {
     }
   }
 
-  // 글자를 칠 때마다(draft) App 이 다시 그려지므로, memo 된 내역 · 답변에 넘기는 함수는 고정한다
+  // memo 된 대화 목록에 넘기므로 렌더마다 새로 만들지 않는다 (입력할 때마다 목록을 다시 그리지 않게)
+  const { select } = chat;
   const handleSelect = useCallback(
     (id: string) => {
-      selectConversation(id);
+      select(id);
       if (isDrawer) {
         closeDrawer();
       }
     },
-    [selectConversation, isDrawer, closeDrawer],
+    [select, isDrawer, closeDrawer],
   );
-
-  function handlePickExample(text: string): void {
-    setDraft(text);
-    inputRef.current?.focus();
-  }
-
-  /** 확인 질문에 답할 수 있게 입력창으로 옮긴다 (같은 세션이라 빠진 조건만 적어도 이어서 답한다) */
-  const handleClarify = useCallback(() => inputRef.current?.focus(), []);
 
   return (
     <div className="flex h-full">
@@ -95,21 +100,21 @@ export function App() {
           onNewChat={handleNewChat}
           onSelect={handleSelect}
           onRemove={chat.remove}
-          lastDeleted={chat.lastDeleted}
+          recentlyDeleted={chat.recentlyDeleted}
           onUndoRemove={chat.undoRemove}
-          isStorageOk={chat.isStorageOk}
+          saveResult={chat.saveResult}
         />
       </SidebarDrawer>
 
-      {/* 덮개가 열린 동안 Tab 이 덮개 뒤로 빠지지 않게 한다 */}
+      {/* 서랍이 열린 동안 Tab 이 서랍 뒤로 빠지지 않게 한다 */}
       <main className="flex min-w-0 flex-1 flex-col" inert={isDrawerOpen}>
-        <header className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
+        <header className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
           {isDrawer ? (
             <button
               ref={triggerRef}
               type="button"
               onClick={openDrawer}
-              aria-label="메뉴 열기 (질문 내역 · 서버 상태)"
+              aria-label="메뉴 열기 (대화 목록 · 서버 상태)"
               aria-expanded={isDrawerOpen}
               aria-controls="sidebar"
               className="-ml-1 rounded-lg px-2 py-1 text-lg leading-none hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -117,45 +122,35 @@ export function App() {
               ☰
             </button>
           ) : null}
-          <RetrievalModeSelect
-            value={retrievalMode}
-            onChange={setChosenMode}
-            modes={modes}
-            disabled={chat.isBusy}
-          />
-          <div className="ml-auto">
+          {/* 제목과 함께 좁은 화면에서는 숨긴다 (머리줄이 두 줄로 늘어난다). 마우스를 올리면 손을 흔들고 반짝이며 눈을 깜박인다.
+              32px 로 그리면 선이 굵고 흐려 보여 40px 로 그리고, 물개가 숨는 좁은 화면과 머리줄 높이가 같도록 음수 여백을 둔다 */}
+          <SealMascot motion="hover" isSubtle className="-my-1 size-10 shrink-0 max-md:hidden" />
+          {/* 좁은 화면에서는 머리줄 자리가 모자라 화면에서만 숨긴다 (스크린 리더는 읽는다) */}
+          <h1 className="truncate text-sm font-semibold max-md:sr-only">{APP_TITLE}</h1>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <AskModeSelect value={mode} onChange={setMode} disabled={chat.isBusy} />
             <ThemeSelect value={theme} onChange={setTheme} />
           </div>
         </header>
         {/* 대화 영역만 경계로 묶어 사이드바 · 입력창은 살려 둔다. 다른 대화로 옮기면 key 로 새로 그린다 */}
         <ErrorBoundary
           key={chat.currentId ?? "new"}
-          message="이 대화를 표시하지 못했습니다. 다른 질문을 고르거나 새로고침해 주세요."
+          message="이 대화를 표시하지 못했습니다. 다른 대화를 고르거나 새로고침해 주세요."
         >
-          <ChatView
-            messages={chat.messages}
-            isBusy={chat.isBusy}
-            onRetry={chat.retry}
-            onClarify={handleClarify}
-            onAnnounce={announce}
-            onPickExample={handlePickExample}
-          />
+          <ChatView messages={chat.messages} onPickExample={handlePickExample} />
         </ErrorBoundary>
         <Composer
           value={draft}
           onChange={setDraft}
-          onSend={(text) => chat.send(text, retrievalMode)}
+          onSend={(text) => chat.send(text, mode)}
           onStop={chat.stop}
           isBusy={isBusyHere}
-          isBlocked={isBusyElsewhere}
+          isDisabled={isBusyElsewhere}
           inputRef={inputRef}
-          placeholder={isClarifying ? CLARIFY_PLACEHOLDER : undefined}
+          hint={isBusyElsewhere ? BUSY_ELSEWHERE_HINT : undefined}
+          onUndoReplace={canUndoReplace ? handleUndoReplace : undefined}
         />
       </main>
-
-      <div role="status" aria-live="polite" className="sr-only">
-        {announcement}
-      </div>
     </div>
   );
 }

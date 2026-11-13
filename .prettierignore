@@ -4,3 +4,5 @@ coverage
 package-lock.json
 # wiki 계약 사본 (npm run sync:contracts). manifest.json 의 해시와 같아야 해서 손으로 · 포맷으로 고치지 않는다
 contracts
+# contracts/openapi.json 에서 생성하는 파일 (npm run gen:api). 손으로 고치지 않는다
+src/api/generated
