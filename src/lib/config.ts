@@ -1,6 +1,6 @@
 // 설정값은 이 파일 한 곳에 모은다.
 
-import { ASK_MODE_DEFAULT, ASK_REQUEST_QUESTION_MAX_LENGTH, type AskMode } from "../api/types";
+import { ASK_REQUEST_QUESTION_MAX_LENGTH, type AskMode } from "../api/types";
 
 /** API 연결 방식: http = 실제 서버(llm-playground-wiki), mock = 서버 없이 계약 예시를 재생하는 목업 */
 export type ApiMode = "http" | "mock";
@@ -38,8 +38,11 @@ export const PENDING_SHOW_DELAY_MS = 300;
 /** 답변 대기 표시가 한번 보이면 최소 이만큼은 둔다. 나타나자마자 사라지지 않게 한다 */
 export const PENDING_MIN_VISIBLE_MS = 500;
 
-/** 처음 고른 답변 방식. 계약의 mode 기본값(단발)이다 */
-export const DEFAULT_ASK_MODE: AskMode = ASK_MODE_DEFAULT;
+/**
+ * 화면이 /ask 에 보내는 답변 방식. 에이전트 모드는 단발로 먼저 답하고, 못 찾았거나 부분 답 구간일 때만
+ * 에이전트 그래프(질문 나누기 → 검색 → 판단)로 넘어간다. 쉬운 질문은 단발과 같고 복합 질문만 더 걸린다
+ */
+export const ASK_MODE: AskMode = "agent";
 
 /** 대화 목록 저장소 키. 저장 모양이 바뀌면 버전을 올린다 (v1 은 /query 시절 모양) */
 export const HISTORY_STORAGE_KEY = "llm-playground:conversations:v2";

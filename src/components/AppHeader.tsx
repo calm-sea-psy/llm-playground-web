@@ -1,8 +1,6 @@
 import type { RefObject } from "react";
 
-import { AskModeSelect } from "./AskModeSelect";
 import { ThemeSelect } from "./ThemeSelect";
-import type { AskMode } from "../api/types";
 import type { Theme } from "../lib/labels";
 
 /** 화면 제목 (index.html 의 title 과 같다) */
@@ -15,23 +13,16 @@ interface AppHeaderProps {
   onOpenDrawer: () => void;
   /** 메뉴 버튼. 서랍을 닫으면 포커스를 여기로 돌려준다 */
   drawerTriggerRef: RefObject<HTMLButtonElement | null>;
-  mode: AskMode;
-  onModeChange: (mode: AskMode) => void;
-  /** 답변을 받는 중이라 답변 방식을 바꿀 수 없는지 */
-  isModeDisabled: boolean;
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
 }
 
-/** 머리줄: 메뉴 버튼(좁은 화면) · 제목 · 답변 방식 · 테마 */
+/** 머리줄: 메뉴 버튼(좁은 화면) · 제목 · 테마 */
 export function AppHeader({
   isDrawer,
   isDrawerOpen,
   onOpenDrawer,
   drawerTriggerRef,
-  mode,
-  onModeChange,
-  isModeDisabled,
   theme,
   onThemeChange,
 }: AppHeaderProps) {
@@ -53,7 +44,6 @@ export function AppHeader({
       {/* 좁은 화면에서는 머리줄 자리가 모자라 화면에서만 숨긴다 (스크린 리더는 읽는다) */}
       <h1 className="truncate text-sm font-semibold max-md:sr-only">{APP_TITLE}</h1>
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        <AskModeSelect value={mode} onChange={onModeChange} disabled={isModeDisabled} />
         <ThemeSelect value={theme} onChange={onThemeChange} />
       </div>
     </header>
