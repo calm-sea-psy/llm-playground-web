@@ -52,6 +52,8 @@ const answerSchema: z.ZodType<Answer> = z.object({
   text: z.string(),
   sources: z.array(sourceSchema),
   stage: z.object({ name: z.string(), message: z.string() }).nullable(),
+  // 이 칸이 생기기 전에 저장한 답은 그래프를 돌았는지 알 수 없어 돌지 않은 것으로 본다
+  hasAgentStage: z.boolean().default(false),
 });
 
 const answerBase = {
