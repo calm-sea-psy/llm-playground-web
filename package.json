@@ -2,6 +2,7 @@
   "name": "llm-playground-web",
   "private": true,
   "version": "0.0.0",
+  "wikiContract": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +12,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -b",
+    "sync:contracts": "node scripts/sync-contracts.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

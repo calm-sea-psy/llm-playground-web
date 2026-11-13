@@ -2,3 +2,5 @@ node_modules
 dist
 coverage
 package-lock.json
+# wiki 계약 사본 (npm run sync:contracts). manifest.json 의 해시와 같아야 해서 손으로 · 포맷으로 고치지 않는다
+contracts
