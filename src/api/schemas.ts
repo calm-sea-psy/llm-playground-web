@@ -10,6 +10,7 @@ import {
   errorEventRaw,
   healthResponseRaw,
   httpValidationErrorRaw,
+  sourceRaw,
   sourcesEventRaw,
   stageEventRaw,
   toDeltaEvent,
@@ -32,6 +33,12 @@ export const stageEventSchema = stageEventRaw.extend({ stage: z.string() });
 
 /** sources 이벤트 data */
 export const sourcesEventSchema = sourcesEventRaw.transform(toSourcesEvent);
+
+/**
+ * 출처 하나 (화면이 저장해 둔 대화를 다시 읽을 때). 출처는 서버 형식과 화면 형식의 필드 이름이 같아 서버 검증 스키마를 그대로 쓴다.
+ * 이름이 달라지면 쓰는 곳의 타입 표기(lib/history.ts 의 z.ZodType<Answer>)에서 컴파일 오류가 난다
+ */
+export const sourceSchema = sourceRaw;
 
 /** delta 이벤트 data */
 export const deltaEventSchema = deltaEventRaw.transform(toDeltaEvent);

@@ -4,7 +4,7 @@ import { z } from "zod";
 
 /** 문구 · 오류 문구 · 계약 위반 내용의 최대 길이 */
 export const TEXT_MAX_LENGTH = 1000;
-/** 오류 이름 · 코드 · 요청 id 의 최대 길이 */
+/** 오류 이름 · 코드의 최대 길이 */
 export const NAME_MAX_LENGTH = 100;
 /** 스택의 최대 길이 */
 export const STACK_MAX_LENGTH = 4000;
@@ -13,7 +13,6 @@ export const STACK_MAX_LENGTH = 4000;
 export const clientLogSchema = z.strictObject({
   level: z.enum(["warn", "error"]),
   message: z.string().min(1).max(TEXT_MAX_LENGTH),
-  requestId: z.string().max(NAME_MAX_LENGTH).optional(),
   error: z
     .strictObject({
       name: z.string().max(NAME_MAX_LENGTH),

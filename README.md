@@ -61,8 +61,8 @@ llm-playground-web/
 ├─ src/
 │  ├─ api/          wiki 계약 · 호출 (client.ts · httpClient.ts · sse.ts · responses.ts · mockClient.ts · generated/)
 │  ├─ hooks/        대화(useChat) · 대화 목록 저장(useChatHistory) · 서버 상태(useHealth) · 화면 보조 훅
-│  ├─ lib/          순수 함수 · 설정 (config.ts · chat.ts · history.ts · citations.ts · labels.ts · logger.ts)
-│  ├─ components/   화면 (ChatView · Composer · Sidebar · Sources · messages/ · seal/)
+│  ├─ lib/          순수 함수 · 설정 (config.ts · chat.ts · history.ts · sources.ts · citations.ts · dates.ts · labels.ts · logger.ts)
+│  ├─ components/   화면 (AppHeader · ChatView · Composer · Sidebar · Sources · messages/ · seal/ 답변 대기 물개)
 │  ├─ providers/    API 클라이언트 · 저장소 주입 (ApiProvider · StorageProvider)
 │  ├─ App.tsx       화면 조립 (사이드바 · 머리줄 · 대화 · 입력창)
 │  └─ main.tsx      시작점. VITE_API_MODE로 실제 · 목업 클라이언트를 골라 주입
@@ -127,7 +127,7 @@ PowerShell의 `echo >`는 UTF-16으로 저장해 Vite가 읽지 못하므로 `Se
 
 ### 4. 확인
 
-http://localhost:5173 을 열어 사이드바 아래가 "서버 정상 · mock · 청크 5개"이면 붙은 것입니다. 예시 질문 "경복궁을 중건한 사람은?"을 보내면 답이 흘러 들어오고, 답 속 `[1]` · 아래 출처 목록이 위키백과 문서로 이어집니다. 질문 끝에 꼬리표를 붙이면 다른 경로를 볼 수 있습니다.
+http://localhost:5173 을 열어 사이드바 아래가 "서버 정상"이면 붙은 것입니다 (실제 데이터로 띄운 wiki면 그 아래에 "Qdrant (local)" · "Qdrant (cloud)"처럼 검색이 붙은 Qdrant 위치가 나오고, 목업 wiki는 위치가 없습니다). 예시 질문 "경복궁을 중건한 사람은?"을 보내면 답이 흘러 들어오고, 답 속 `[1]` · 아래 출처 목록이 위키백과 문서로 이어집니다. 질문 끝에 꼬리표를 붙이면 다른 경로를 볼 수 있습니다.
 
 | 질문                   | 화면                                                                                     |
 | ---------------------- | ---------------------------------------------------------------------------------------- |
@@ -139,7 +139,7 @@ http://localhost:5173 을 열어 사이드바 아래가 "서버 정상 · mock �
 
 ### 5. (선택) 서버 없이 목업으로 보기
 
-`.env.local`이 없으면(또는 `VITE_API_MODE=mock`) `npm run dev`는 서버 없이 `contracts/examples/ask_*.json`의 이벤트 열을 재생합니다. 꼬리표는 위 표와 같게 고르고, 사이드바는 늘 "서버 정상 · mock · 청크 5개"입니다.
+`.env.local`이 없으면(또는 `VITE_API_MODE=mock`) `npm run dev`는 서버 없이 `contracts/examples/ask_*.json`의 이벤트 열을 재생합니다. 꼬리표는 위 표와 같게 고르고, 사이드바는 늘 "서버 정상"입니다 (Qdrant 위치 없음).
 
 ### 6. (선택) Docker로 띄우기
 
@@ -186,7 +186,7 @@ docker compose는 `.env`를, 개발 서버는 `.env` · `.env.local`을 읽습�
 
 | 메서드 | 경로                      | 내용                                                                                                                                         |
 | ------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/health`                 | 30초마다 확인. `{"status", "collection", "chunks"}` — 사이드바 "서버 정상 · 컬렉션 · 청크 수"                                                |
+| GET    | `/health`                 | 30초마다 확인. `{"status", "collection", "chunks", "qdrant"}` — 사이드바 "서버 정상"과 그 아래 "Qdrant (local · cloud)" (목업은 위치 없음)   |
 | POST   | `/ask?mode=single\|agent` | `{"question"}`(1~300자) → `text/event-stream`. 화면은 `fetch` 본문 스트림을 `event:` · `data:` 줄로 나눠 읽음 (POST라 `EventSource`는 못 씀) |
 | POST   | `/search`                 | 화면은 부르지 않음. 개발 서버 · nginx가 같은 주소로 넘김                                                                                     |
 

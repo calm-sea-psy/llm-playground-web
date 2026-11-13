@@ -7,7 +7,9 @@ import type { AskEnd, AskMode, AskProgress, Source } from "../api/types";
 const MAX_TITLE_LENGTH = 40;
 
 /** 답이 중간에 끊긴 이유 (done 의 failed · timed_out · truncated 를 이 순서로 하나만 본다) */
-export type AnswerCut = "failed" | "timed_out" | "truncated";
+export const ANSWER_CUTS = ["failed", "timed_out", "truncated"] as const;
+/** ANSWER_CUTS 의 값 하나 */
+export type AnswerCut = (typeof ANSWER_CUTS)[number];
 
 /** 지금까지 받은 단계 (마지막 stage 이벤트) */
 export interface AnswerStage {
@@ -70,6 +72,30 @@ export interface Conversation {
   messages: Message[];
 }
 
+/** 이벤트를 받을 답변 메시지: 어느 대화의 어느 답변인지 */
+export interface AnswerRef {
+  conversationId: string;
+  answerId: string;
+}
+
+/** 받는 중인 답변에 더할 진행 이벤트 (withAnswerProgress) */
+export interface AnswerProgressUpdate extends AnswerRef {
+  progress: AskProgress;
+}
+
+/** 답변의 새 진행 상태와 그 시각 (withAnswerState) */
+export interface AnswerStateUpdate extends AnswerRef {
+  next: AnswerState;
+  /** 대화의 updatedAt 으로 쓴다 (ms) */
+  now: number;
+}
+
+// 한 답변 메시지를 바꾸는 방법. now 가 있으면 그 대화의 updatedAt 도 바꾼다
+interface AnswerChange extends AnswerRef {
+  change: (message: AnswerMessage) => AnswerMessage;
+  now?: number;
+}
+
 /** 아직 아무것도 받지 못한 답 */
 export const EMPTY_ANSWER: Answer = { text: "", sources: [], stage: null };
 
@@ -97,10 +123,7 @@ function cutOf(end: Extract<AskEnd, { event: "done" }>): AnswerCut | null {
 // 한 답변 메시지를 바꾼 새 대화 목록. 다른 대화 · 메시지 객체는 그대로 둔다 (다시 그리지 않게)
 function withAnswerMessage(
   conversations: Conversation[],
-  conversationId: string,
-  answerId: string,
-  change: (message: AnswerMessage) => AnswerMessage,
-  now?: number,
+  { conversationId, answerId, change, now }: AnswerChange,
 ): Conversation[] {
   return conversations.map((c) =>
     c.id === conversationId
@@ -162,11 +185,6 @@ export function hasPendingAnswer(messages: Message[]): boolean {
   return messages.some((m) => m.role === "assistant" && m.state === "pending");
 }
 
-/** 출처 링크 주소. http · https 가 아니면(javascript: 등) 링크로 쓰지 않고 undefined */
-export function sourceHref(source: Source): string | undefined {
-  return /^https?:\/\//i.test(source.url) ? source.url : undefined;
-}
-
 /** 질문 하나를 보낼 때 쓰는 id 와 시각. 부르는 쪽이 만들어 넘겨 함수는 순수하게 둔다 */
 export interface QuestionDraft {
   conversationId: string;
@@ -210,29 +228,25 @@ export function withQuestion(
 /** 받는 중인 답변에 진행 이벤트를 더한 새 대화 목록. updatedAt 은 그대로 둔다 (끝날 때 바꾼다) */
 export function withAnswerProgress(
   conversations: Conversation[],
-  conversationId: string,
-  answerId: string,
-  progress: AskProgress,
+  { conversationId, answerId, progress }: AnswerProgressUpdate,
 ): Conversation[] {
-  return withAnswerMessage(conversations, conversationId, answerId, (m) => ({
-    ...m,
-    answer: answerWith(m.answer, progress),
-  }));
+  return withAnswerMessage(conversations, {
+    conversationId,
+    answerId,
+    change: (m) => ({ ...m, answer: answerWith(m.answer, progress) }),
+  });
 }
 
 /** 한 답변의 진행 상태를 바꾼 새 대화 목록. 받은 답은 그대로 두고, 그 대화의 updatedAt 을 now 로 바꾼다 */
 export function withAnswerState(
   conversations: Conversation[],
-  conversationId: string,
-  answerId: string,
-  next: AnswerState,
-  now: number,
+  { conversationId, answerId, next, now }: AnswerStateUpdate,
 ): Conversation[] {
-  return withAnswerMessage(
-    conversations,
+  return withAnswerMessage(conversations, {
     conversationId,
     answerId,
-    (m) => ({
+    now,
+    change: (m) => ({
       id: m.id,
       role: m.role,
       question: m.question,
@@ -240,6 +254,5 @@ export function withAnswerState(
       answer: m.answer,
       ...next,
     }),
-    now,
-  );
+  });
 }

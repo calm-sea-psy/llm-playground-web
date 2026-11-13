@@ -3,7 +3,7 @@
 import type { AnswerCut } from "./chat";
 import type { SaveResult } from "./history";
 import type { RequestErrorCode } from "../api/client";
-import type { AskMode } from "../api/types";
+import type { AskMode, ErrorEventCode } from "../api/types";
 
 /** 화면 테마: 시스템 설정을 따르기 · 라이트 · 다크 */
 export const THEMES = ["system", "light", "dark"] as const;
@@ -43,10 +43,10 @@ export const CUT_TEXT: Record<AnswerCut, string> = {
 };
 
 /**
- * 서버가 error 이벤트로 실패를 알렸는데 문구가 비어 있을 때의 안내 (코드별). 문구가 있으면 서버 문구를 보여 준다.
- * 모르는 코드는 UNKNOWN_ERROR_TEXT
+ * 서버가 error 이벤트로 실패를 알렸는데 문구가 비어 있을 때의 안내 (계약의 코드별). 문구가 있으면 서버 문구를 보여 준다.
+ * 계약에 코드가 더해지면 여기서 타입 오류가 난다. 계약에 없는 코드는 UNKNOWN_ERROR_TEXT
  */
-const ERROR_EVENT_TEXT: Readonly<Partial<Record<string, string>>> = {
+const ERROR_EVENT_TEXT: Readonly<Record<ErrorEventCode, string>> = {
   generation: "답을 만드는 중에 문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.",
   timeout: "답을 만드는 시간이 초과되었습니다. 잠시 뒤 다시 시도해 주세요.",
   internal: "서버에서 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.",
@@ -70,13 +70,15 @@ export const REQUEST_ERROR_TEXT: Record<Exclude<RequestErrorCode, "aborted">, st
   invalid_request: "요청을 처리하지 못했습니다. 다시 시도해 주세요.",
 };
 
-/**
- * error 이벤트의 화면 문구: 서버 문구, 비어 있으면 코드별 안내, 모르는 코드면 일반 안내.
- * 코드는 서버가 준 문자열이라 constructor 같은 값이 Object 의 속성을 집지 않게 한다
- */
+// 서버가 준 코드가 계약에 있는 코드인지. constructor 같은 값이 Object 의 속성을 집지 않게 자기 키만 본다
+function isKnownErrorCode(code: string): code is ErrorEventCode {
+  return Object.hasOwn(ERROR_EVENT_TEXT, code);
+}
+
+/** error 이벤트의 화면 문구: 서버 문구, 비어 있으면 코드별 안내, 모르는 코드면 일반 안내 */
 export function errorEventText(code: string, message: string): string {
   if (message.trim() !== "") {
     return message;
   }
-  return (Object.hasOwn(ERROR_EVENT_TEXT, code) && ERROR_EVENT_TEXT[code]) || UNKNOWN_ERROR_TEXT;
+  return isKnownErrorCode(code) ? ERROR_EVENT_TEXT[code] : UNKNOWN_ERROR_TEXT;
 }

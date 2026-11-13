@@ -64,7 +64,7 @@ export function createApp(sink: LogSink, mapStack: StackMapper): Express {
       res.sendStatus(400);
       return;
     }
-    const { level, message, requestId, error } = parsed.data;
+    const { level, message, error } = parsed.data;
     const mapped = error?.stack === undefined ? undefined : mapStack(error.stack);
     sink.write({
       level,
@@ -77,7 +77,6 @@ export function createApp(sink: LogSink, mapStack: StackMapper): Express {
         code: error?.code,
         cause: error?.message,
         detail: error?.detail,
-        request: requestId,
         ua: req.get("user-agent")?.slice(0, USER_AGENT_MAX_LENGTH),
       },
     });

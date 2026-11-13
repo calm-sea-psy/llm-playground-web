@@ -24,16 +24,10 @@ export function SealStudy(props: SealProps) {
   return (
     <svg viewBox="0 0 128 128" aria-hidden="true" className={svg.svgClass}>
       <g fill="#ffd23f" stroke="#e9b021" strokeWidth="1" strokeLinejoin="round">
-        <g
-          data-seal-spark
-          className="origin-center transform-fill motion-safe:animate-seal-twinkle"
-        >
+        <g className="origin-center transform-fill motion-safe:animate-seal-twinkle">
           <path d={BIG_SPARKLE} />
         </g>
-        <g
-          data-seal-spark
-          className="origin-center transform-fill motion-safe:animate-seal-twinkle-late"
-        >
+        <g className="origin-center transform-fill motion-safe:animate-seal-twinkle-late">
           <path d={SMALL_SPARKLE} />
         </g>
       </g>
@@ -72,7 +66,7 @@ export function SealStudy(props: SealProps) {
         <path d="M 62 108 C 72 103 84 102 96 105" />
       </g>
 
-      <g data-seal-paw className="origin-[20px_80px] transform-view motion-safe:animate-seal-write">
+      <g className="origin-[20px_80px] transform-view motion-safe:animate-seal-write">
         <g stroke={SEAL_INK} strokeWidth="1.6" strokeLinejoin="round" transform="rotate(-28 20 74)">
           <rect x="17" y="46" width="6" height="5" rx="1.5" fill="#f29aa6" />
           <rect x="17" y="50" width="6" height="28" fill="#ffd23f" />

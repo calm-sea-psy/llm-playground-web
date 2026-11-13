@@ -72,18 +72,20 @@ function parseJson(text: string): unknown {
   }
 }
 
-/**
- * 끊긴 요청의 오류. 호출자가 중지했으면 aborted, 대기 한도면 timeout(읽기 요청은 network), 그 밖은 fallback
- *
- * @param timeoutCode 대기 한도에 걸렸을 때의 코드
- */
-function cutError(
-  e: unknown,
-  callerSignal: AbortSignal | undefined,
-  limit: Deadline,
-  timeoutCode: "timeout" | "network",
-  fallback: "network" | "interrupted",
-): RequestError {
+/** 끊긴 요청 하나의 사정: 누가 끊었는지 가리고, 사정별로 어느 코드를 쓸지 */
+interface Cut {
+  /** 호출자의 중지 신호. 이것이 끊었으면 aborted */
+  callerSignal: AbortSignal | undefined;
+  /** 대기 한도. 이것이 끊었으면 timeoutCode */
+  limit: Deadline;
+  /** 대기 한도에 걸렸을 때의 코드 (읽기 요청은 network) */
+  timeoutCode: "timeout" | "network";
+  /** 그 밖의 실패 코드 */
+  fallback: "network" | "interrupted";
+}
+
+/** 끊긴 요청의 오류. 호출자가 중지했으면 aborted, 대기 한도면 timeoutCode, 그 밖은 fallback */
+function cutError(e: unknown, { callerSignal, limit, timeoutCode, fallback }: Cut): RequestError {
   if (e instanceof RequestError) {
     return e;
   }
@@ -168,7 +170,12 @@ export function createHttpApiClient({
         await readResult(await fetch(`${root}${PATH_HEALTH}`, { signal: limit.signal })),
       );
     } catch (e) {
-      throw cutError(e, signal, limit, "network", "network");
+      throw cutError(e, {
+        callerSignal: signal,
+        limit,
+        timeoutCode: "network",
+        fallback: "network",
+      });
     } finally {
       limit.dispose();
     }
@@ -195,7 +202,12 @@ export function createHttpApiClient({
           throw readAskRejection(await readResult(res));
         }
       } catch (e) {
-        throw cutError(e, signal, limit, "timeout", "network");
+        throw cutError(e, {
+          callerSignal: signal,
+          limit,
+          timeoutCode: "timeout",
+          fallback: "network",
+        });
       }
       const type = res.headers.get("Content-Type") ?? "";
       if (!type.startsWith(EVENT_STREAM_TYPE) || res.body === null) {
@@ -207,7 +219,12 @@ export function createHttpApiClient({
       try {
         return await readEvents(res.body, limit.restart, onProgress);
       } catch (e) {
-        throw cutError(e, signal, limit, "timeout", "interrupted");
+        throw cutError(e, {
+          callerSignal: signal,
+          limit,
+          timeoutCode: "timeout",
+          fallback: "interrupted",
+        });
       }
     } finally {
       limit.dispose();

@@ -7,12 +7,7 @@
 @theme {
   /* 물개 그림의 움직임 (components/seal). 주기를 1.2s 와 그 배수 · 절반으로 맞추고 시작 시점만 어긋나게 둔다 */
   --animate-seal-bob: seal-bob 1.2s ease-in-out infinite;
-  --animate-seal-pump: seal-pump 1.2s ease-in-out infinite;
-  --animate-seal-pump-late: seal-pump 1.2s ease-in-out -0.6s infinite;
   --animate-seal-wag: seal-wag 1.2s ease-in-out infinite;
-  --animate-seal-spark: seal-spark 1.2s ease-in-out infinite;
-  --animate-seal-spark-2: seal-spark 1.2s ease-in-out 0.15s infinite;
-  --animate-seal-spark-3: seal-spark 1.2s ease-in-out 0.3s infinite;
   --animate-seal-blink: seal-blink 3.6s linear infinite;
   --animate-seal-write: seal-write 0.6s ease-in-out infinite;
   --animate-seal-twinkle: seal-twinkle 2.4s ease-in-out infinite;
@@ -28,16 +23,6 @@
     }
   }
 
-  @keyframes seal-pump {
-    0%,
-    100% {
-      transform: translateY(2px) rotate(0deg);
-    }
-    50% {
-      transform: translateY(-6px) rotate(-5deg);
-    }
-  }
-
   @keyframes seal-wag {
     0%,
     100% {
@@ -45,18 +30,6 @@
     }
     50% {
       transform: rotate(4deg);
-    }
-  }
-
-  @keyframes seal-spark {
-    0%,
-    100% {
-      opacity: 0.35;
-      transform: scale(0.75);
-    }
-    50% {
-      opacity: 1;
-      transform: scale(1.1);
     }
   }
 
@@ -93,18 +66,6 @@
       opacity: 1;
       transform: scale(1.1) rotate(20deg);
     }
-  }
-}
-
-/* 잔잔한 움직임(useSealSvg 의 isSubtle)에서 반짝임이 크기 변화 없이 밝기만 바뀐다.
-   animate-* 유틸리티가 아니라 keyframes 이름으로만 쓰므로 @theme 밖에 둔다 (@theme 의 keyframes 는 animate-* 가 쓰일 때만 나온다) */
-@keyframes seal-glow {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 1;
   }
 }
 

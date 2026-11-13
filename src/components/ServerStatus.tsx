@@ -16,8 +16,9 @@ interface ServerStatusProps {
   state: HealthState;
 }
 
-/** 서버 상태(/health) 한 줄. 정상이면 검색 대상 컬렉션과 색인한 청크 수를 덧붙인다 */
+/** 서버 상태(/health) 한 줄. 정상이면 검색이 붙은 Qdrant 의 위치(local · cloud)를 덧붙인다 (목업 서버는 없다) */
 export function ServerStatus({ state }: ServerStatusProps) {
+  const qdrant = state.kind === "ok" ? state.health.qdrant : null;
   return (
     <div role="status" className="space-y-0.5">
       <p className="flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
@@ -27,10 +28,8 @@ export function ServerStatus({ state }: ServerStatusProps) {
         />
         {STATUS_TEXT[state.kind]}
       </p>
-      {state.kind === "ok" ? (
-        <p className="truncate pl-4 text-xs text-zinc-500">
-          {state.health.collection} · 청크 {state.health.chunks.toLocaleString("ko-KR")}개
-        </p>
+      {qdrant !== null ? (
+        <p className="truncate pl-4 text-xs text-zinc-500">Qdrant ({qdrant})</p>
       ) : null}
     </div>
   );

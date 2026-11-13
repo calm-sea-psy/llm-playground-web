@@ -1,5 +1,6 @@
 import { AnswerText } from "./AnswerText";
 import { ErrorMessage } from "./ErrorMessage";
+import type { StageName } from "../../api/types";
 import { usePendingIndicator } from "../../hooks/usePendingIndicator";
 import type { AnswerMessage } from "../../lib/chat";
 import {
@@ -17,8 +18,8 @@ interface AssistantMessageProps {
   message: AnswerMessage;
 }
 
-/** partial 단계로 답했는지 (단계 이름이 계약 값과 같을 때만) */
-const PARTIAL_STAGE = "partial";
+/** partial 단계로 답했는지 (단계 이름이 계약 값과 같을 때만). 계약에서 이 이름이 빠지면 타입 오류가 난다 */
+const PARTIAL_STAGE: StageName = "partial";
 
 // 기다리는 표시의 높이. 표시를 보이기 전에도 같은 높이로 자리를 잡아 둔다
 const PENDING_HEIGHT_CLASS = "h-16";

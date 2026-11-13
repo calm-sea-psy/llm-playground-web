@@ -8,7 +8,7 @@ export interface UseDraftResult {
   draft: string;
   /** 지금 대화의 초안을 바꾼다 */
   setDraft: (text: string) => void;
-  /** 입력창을 text 로 바꾼다 (예시 질문 · 되묻기의 원래 질문). 쓰던 글이 있었으면 undoReplace 로 되돌릴 수 있다 */
+  /** 입력창을 text 로 바꾼다 (예시 질문을 눌렀을 때). 쓰던 글이 있었으면 undoReplace 로 되돌릴 수 있다 */
   replaceDraft: (text: string) => void;
   /** replaceDraft 전에 쓰던 글로 되돌릴 수 있는지. 바꾼 뒤 입력창에 손대지 않은 동안만 그렇다 (실행 취소 안내를 보여 줄지 정한다) */
   canUndoReplace: boolean;

@@ -1,5 +1,5 @@
 import type { Source } from "../api/types";
-import { sourceHref } from "../lib/chat";
+import { sourceHref, sourceLabel } from "../lib/sources";
 
 interface SourcesProps {
   /** number 오름차순 (서버가 정한 순서 그대로) */
@@ -14,7 +14,7 @@ interface SourceLabelProps {
 
 function SourceLabel({ source }: SourceLabelProps) {
   const href = sourceHref(source);
-  const label = source.section ? `${source.title} › ${source.section}` : source.title;
+  const label = sourceLabel(source);
   if (href === undefined) {
     return <span>{label}</span>;
   }

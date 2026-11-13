@@ -400,6 +400,7 @@ export const healthResponseRaw = z.object({
   status: z.literal("ok"),
   collection: z.string(),
   chunks: z.number().int(),
+  qdrant: z.enum(["local", "cloud"]).nullable().optional(),
 });
 
 /** 서버 상태. 웹 프론트엔드 사이드바가 쓴다. */
@@ -410,6 +411,8 @@ export interface HealthResponse {
   collection: string;
   /** BM25 색인에 올린 청크 수 */
   chunks: number;
+  /** 검색이 붙은 Qdrant 의 위치: local(로컬 Docker) · cloud(Qdrant Cloud). 목업 서버는 null · 서버가 보내지 않으면 null */
+  qdrant: "local" | "cloud" | null;
 }
 
 /** HealthResponse 서버 형식 → 화면 형식 */
@@ -418,6 +421,7 @@ export function toHealthResponse(raw: z.output<typeof healthResponseRaw>): Healt
     status: raw.status,
     collection: raw.collection,
     chunks: raw.chunks,
+    qdrant: raw.qdrant ?? null,
   };
 }
 
