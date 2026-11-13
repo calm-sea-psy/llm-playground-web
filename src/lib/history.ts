@@ -5,11 +5,18 @@
 
 import { z } from "zod";
 
-import { hasPendingAnswer, type Answer, type Conversation, type Message } from "./chat";
+import {
+  ANSWER_CUTS,
+  hasPendingAnswer,
+  type Answer,
+  type Conversation,
+  type Message,
+} from "./chat";
 import { CURRENT_STORAGE_KEY, HISTORY_STORAGE_KEY, MAX_CONVERSATIONS } from "./config";
 import { logWarning } from "./logger";
 import { readItem, writeItem, type KeyValueStorage } from "./storage";
 import { REQUEST_ERROR_CODES } from "../api/client";
+import { sourceSchema } from "../api/schemas";
 import { ASK_MODES } from "../api/types";
 
 /** 저장본 형식 버전. 저장 모양이 바뀌면 올린다 (다른 버전 저장본은 빈 목록으로 본다) */
@@ -37,15 +44,7 @@ export interface LoadedHistory {
 
 const answerSchema: z.ZodType<Answer> = z.object({
   text: z.string(),
-  sources: z.array(
-    z.object({
-      number: z.number(),
-      title: z.string(),
-      section: z.string(),
-      url: z.string(),
-      score: z.number(),
-    }),
-  ),
+  sources: z.array(sourceSchema),
   stage: z.object({ name: z.string(), message: z.string() }).nullable(),
 });
 
@@ -66,7 +65,7 @@ const messageSchema: z.ZodType<Message> = z
       ...answerBase,
       state: z.literal("done"),
       cited: z.array(z.number()),
-      cut: z.enum(["failed", "timed_out", "truncated"]).nullable(),
+      cut: z.enum(ANSWER_CUTS).nullable(),
     }),
     z.object({ ...answerBase, state: z.literal("error"), code: z.string(), message: z.string() }),
     z.object({

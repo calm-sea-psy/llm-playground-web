@@ -7,7 +7,9 @@ import type { AskEnd, AskMode, AskProgress, Source } from "../api/types";
 const MAX_TITLE_LENGTH = 40;
 
 /** 답이 중간에 끊긴 이유 (done 의 failed · timed_out · truncated 를 이 순서로 하나만 본다) */
-export type AnswerCut = "failed" | "timed_out" | "truncated";
+export const ANSWER_CUTS = ["failed", "timed_out", "truncated"] as const;
+/** ANSWER_CUTS 의 값 하나 */
+export type AnswerCut = (typeof ANSWER_CUTS)[number];
 
 /** 지금까지 받은 단계 (마지막 stage 이벤트) */
 export interface AnswerStage {
