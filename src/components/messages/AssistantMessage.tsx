@@ -38,9 +38,10 @@ function PendingMessage({ text }: PendingMessageProps) {
   );
 }
 
-// 답 아래 한 줄 안내: 답변 방식(에이전트일 때) · partial 로 답함
+// 답 아래 한 줄 안내: 에이전트 그래프를 거쳐 답함 · partial 로 답함.
+// 에이전트 방식으로 보내도 단발로 끝났으면(그래프 단계가 없으면) 에이전트 안내를 붙이지 않는다
 function notesOf(message: AnswerMessage): string[] {
-  const notes = message.mode === "agent" ? [`${ASK_MODE_NAMES.agent}로 답함`] : [];
+  const notes = message.answer.hasAgentStage ? [`${ASK_MODE_NAMES.agent}로 답함`] : [];
   return message.state === "done" && message.answer.stage?.name === PARTIAL_STAGE
     ? [...notes, PARTIAL_NOTE]
     : notes;

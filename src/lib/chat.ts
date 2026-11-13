@@ -6,6 +6,9 @@ import type { AskEnd, AskMode, AskProgress, Source } from "../api/types";
 /** 사이드바 제목 최대 글자 수 */
 const MAX_TITLE_LENGTH = 40;
 
+/** 에이전트 그래프 노드의 단계 이름 앞말 (계약: agent_decompose · agent_search · agent_judge). 그래프를 돌 때만 온다 */
+const AGENT_STAGE_PREFIX = "agent_";
+
 /** 답이 중간에 끊긴 이유 (done 의 failed · timed_out · truncated 를 이 순서로 하나만 본다) */
 export const ANSWER_CUTS = ["failed", "timed_out", "truncated"] as const;
 /** ANSWER_CUTS 의 값 하나 */
@@ -27,6 +30,11 @@ export interface Answer {
   sources: Source[];
   /** 마지막 단계. 아직 받지 못했으면 null */
   stage: AnswerStage | null;
+  /**
+   * 에이전트 그래프의 단계(agent_*)를 하나라도 받았는지. 에이전트 방식으로 보내도 단발로 끝나면(관문 · 거절 ·
+   * 문서에서 바로 찾음) 그래프를 돌지 않아 false 다
+   */
+  hasAgentStage: boolean;
 }
 
 /** 유저 질문 */
@@ -97,7 +105,7 @@ interface AnswerChange extends AnswerRef {
 }
 
 /** 아직 아무것도 받지 못한 답 */
-export const EMPTY_ANSWER: Answer = { text: "", sources: [], stage: null };
+export const EMPTY_ANSWER: Answer = { text: "", sources: [], stage: null, hasAgentStage: false };
 
 /** UUID v4 의 i 번째 바이트: 7번째는 버전(4), 9번째는 변형(RFC 4122) 비트를 박는다 */
 function uuidV4Byte(byte: number, i: number): number {
@@ -153,7 +161,11 @@ export function newId(): string {
 export function answerWith(answer: Answer, progress: AskProgress): Answer {
   switch (progress.event) {
     case "stage":
-      return { ...answer, stage: { name: progress.stage, message: progress.message } };
+      return {
+        ...answer,
+        stage: { name: progress.stage, message: progress.message },
+        hasAgentStage: answer.hasAgentStage || progress.stage.startsWith(AGENT_STAGE_PREFIX),
+      };
     case "sources":
       return { ...answer, sources: progress.sources };
     case "delta":
