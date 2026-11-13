@@ -61,8 +61,8 @@ llm-playground-web/
 ├─ src/
 │  ├─ api/          wiki 계약 · 호출 (client.ts · httpClient.ts · sse.ts · responses.ts · mockClient.ts · generated/)
 │  ├─ hooks/        대화(useChat) · 대화 목록 저장(useChatHistory) · 서버 상태(useHealth) · 화면 보조 훅
-│  ├─ lib/          순수 함수 · 설정 (config.ts · chat.ts · history.ts · citations.ts · labels.ts · logger.ts)
-│  ├─ components/   화면 (ChatView · Composer · Sidebar · Sources · messages/ · seal/)
+│  ├─ lib/          순수 함수 · 설정 (config.ts · chat.ts · history.ts · sources.ts · citations.ts · dates.ts · labels.ts · logger.ts)
+│  ├─ components/   화면 (AppHeader · ChatView · Composer · Sidebar · Sources · messages/ · seal/ 답변 대기 물개)
 │  ├─ providers/    API 클라이언트 · 저장소 주입 (ApiProvider · StorageProvider)
 │  ├─ App.tsx       화면 조립 (사이드바 · 머리줄 · 대화 · 입력창)
 │  └─ main.tsx      시작점. VITE_API_MODE로 실제 · 목업 클라이언트를 골라 주입
