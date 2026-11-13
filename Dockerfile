@@ -1,22 +1,43 @@
-# 화면 이미지: Node 로 정적 파일을 빌드하고 nginx 로 서빙한다.
-# nginx 가 /health · /query 를 백엔드(BACKEND_URL)로 넘겨, 브라우저는 같은 주소만 부른다 (CORS 불필요).
+# 배포용 이미지 두 가지. 실행은 compose.yaml 이 한다.
+# - web: Node 로 빌드한 정적 파일을 nginx 가 내려주고, wiki 계약 요청은 BACKEND_URL 로, 화면 로그는 log-server 로 넘긴다
+# - log-server: 화면 로그를 받아 winston 으로 파일에 남긴다
 
+# 1) 빌드: package-lock.json 그대로 설치하고 dist/ 를 만든다 (워크스페이스라 server/package.json 도 있어야 설치된다).
+#    소스맵은 공개하지 않도록 dist/ 밖으로 옮긴다
 FROM node:24-alpine AS build
 WORKDIR /app
-
-# 의존성만 먼저 설치 (package*.json 이 그대로면 이 층은 캐시를 쓴다)
 COPY package.json package-lock.json ./
+COPY server/package.json server/
 RUN npm ci --no-audit --no-fund
-
 COPY . .
-# 빌드 때 화면에 박히는 값. http = 실제 백엔드, mock = 서버 없이 목업
+# 빌드 때 화면에 박히는 값. http = 실제 wiki, mock = 서버 없이 계약 예시를 재생하는 목업
 ARG VITE_API_MODE=http
 ENV VITE_API_MODE=$VITE_API_MODE
-RUN npm run build
+RUN npm run build && mkdir sourcemaps && mv dist/assets/*.map sourcemaps/
 
-FROM nginx:stable-alpine
-# 시작할 때 nginx 이미지가 templates/*.template 의 ${BACKEND_URL} 을 채워 conf.d 에 둔다
+# 2) 로그 서버: 서버 의존성과 소스, 스택을 원본 위치로 바꿀 소스맵만 올린다. Node 가 TypeScript 를 그대로 실행한다
+FROM node:24-alpine AS log-server
+ENV NODE_ENV=production
+ENV LOG_DIR=/var/log/llm-playground-web
+ENV SOURCE_MAP_DIR=/app/sourcemaps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY server/package.json server/
+RUN npm ci --omit=dev --workspace=server
+COPY server/src server/src
+COPY shared shared
+COPY --from=build /app/sourcemaps sourcemaps
+# root 가 아닌 사용자로 실행해도 로그를 쓸 수 있게 폴더 소유자를 맞춘다
+RUN mkdir -p "$LOG_DIR" && chown node:node "$LOG_DIR"
+USER node
+EXPOSE 3001
+CMD ["node", "server/src/main.ts"]
+
+# 3) 화면: 빌드 결과와 nginx 설정만 올린다 (Node 없이 뜬다). 마지막 단계라 target 없는 docker build 의 결과물이다.
+#    시작할 때 nginx 이미지가 templates/*.template 의 ${BACKEND_URL} 을 채워 conf.d 에 둔다
+FROM nginx:1.29-alpine AS web
 COPY docker/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY nginx-security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 ENV BACKEND_URL=http://host.docker.internal:8000
 EXPOSE 80

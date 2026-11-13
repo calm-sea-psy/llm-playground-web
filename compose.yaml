@@ -1,9 +1,24 @@
-# 화면 실행: docker compose up -d --build → http://localhost:8080
-# 설정은 .env (예시: .env.example). 바꾼 뒤에는 --build 로 다시 띄운다.
+# 화면(web, nginx)과 화면 로그를 저장하는 로그 서버(log-server, Node.js + winston).
+# wiki API 는 따로 띄운다 (기본: 내 PC 의 8000 포트 → BACKEND_URL). 설정은 .env (예시: .env.example)
+#
+#   docker compose up -d --build     → http://localhost:8080
+#   docker compose down
+#
+# 화면 로그는 logs/ 의 날짜별 파일에 쌓인다. 컨테이너를 지워도 남는다.
+
+name: llm-playground-web
+
+x-logging: &limited-logging # docker logs 가 끝없이 쌓이지 않게 크기를 묶는다
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   web:
     build:
       context: .
+      target: web
       args:
         VITE_API_MODE: ${VITE_API_MODE:-http}
     image: llm-playground-web:local
@@ -11,12 +26,32 @@ services:
       - "${WEB_PORT:-8080}:80"
     environment:
       BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8000}
-    # Linux 에서도 host.docker.internal 로 내 PC 에서 띄운 백엔드에 닿게 한다 (Docker Desktop 은 원래 된다)
+    # Linux 에서도 host.docker.internal 로 내 PC 에서 띄운 wiki 에 닿게 한다 (Docker Desktop 은 원래 된다)
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    logging: *limited-logging
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 30s
       timeout: 3s
       retries: 3
+    restart: unless-stopped
+
+  log-server: # 포트를 밖으로 열지 않는다. 브라우저 요청은 web 의 /client-logs 로만 들어온다 (요청 수 · 크기 제한)
+    build:
+      context: .
+      target: log-server
+    image: llm-playground-web-log-server:local
+    user: "${LOG_UID:-1000}" # Linux 에서 logs/ 소유자가 uid 1000 이 아니면 LOG_UID 로 맞춘다
+    environment:
+      TZ: Asia/Seoul # 로그 시각과 파일 날짜의 기준
+    volumes:
+      - ./logs:/var/log/llm-playground-web
+    logging: *limited-logging
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped

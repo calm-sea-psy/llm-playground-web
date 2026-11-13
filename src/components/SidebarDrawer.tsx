@@ -4,7 +4,7 @@ const DRAWER_PANEL_CLASS =
   "fixed inset-y-0 left-0 z-40 flex shadow-xl transition-transform duration-200 motion-reduce:transition-none";
 
 interface SidebarDrawerProps {
-  /** 좁은 화면이라 덮개로 동작하는지. false 면 그냥 자리를 차지한다 */
+  /** 좁은 화면이라 서랍으로 동작하는지. false 면 그냥 자리를 차지한다 */
   isDrawer: boolean;
   isOpen: boolean;
   onClose: () => void;
@@ -12,7 +12,7 @@ interface SidebarDrawerProps {
   children: ReactNode;
 }
 
-/** 사이드바를 감싸는 자리: 넓은 화면에서는 그대로, 좁은 화면에서는 배경과 함께 덮개로 연다 */
+/** 사이드바 자리: 넓은 화면에서는 그대로, 좁은 화면에서는 배경과 함께 서랍으로 연다 */
 export function SidebarDrawer({
   isDrawer,
   isOpen,

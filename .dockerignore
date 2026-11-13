@@ -1,15 +1,16 @@
-# 이미지 빌드에 넣지 않는 것 (git 으로 받는 팀원과 같은 내용으로 빌드되게 테스트도 뺀다)
+# 이미지 빌드에 쓰지 않는 것. node_modules 는 컨테이너 안에서 npm ci 로 새로 설치한다 (호스트 것은 OS 가 달라 못 쓴다)
 node_modules
 dist
+logs
 .git
 .claude
 .vscode
 .idea
+.env*
 *.local
-.env
+*.tsbuildinfo
+
+# 테스트는 이미지에 넣지 않는다 (git 으로 받은 사람과 같은 내용으로 빌드되게. 테스트 도우미는 로컬에만 있다)
 **/*.test.ts
 **/*.test.tsx
 src/test
-Dockerfile
-compose.yaml
-.dockerignore

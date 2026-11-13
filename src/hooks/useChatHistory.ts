@@ -1,66 +1,73 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useRef, useState, type RefObject } from "react";
 
 import { useStorage } from "./useStorage";
+import { useStorageChange } from "./useStorageChange";
+import { HISTORY_STORAGE_KEY } from "../lib/config";
 import {
-  HISTORY_KEY,
   loadHistory,
-  mergeSavedHistory,
-  saveCurrentId,
+  mergeFromOtherTab,
+  mergeStoredHistory,
   saveHistory,
   type LoadedHistory,
+  type SaveResult,
 } from "../lib/history";
 
-/** useChatHistory 가 돌려주는 내역 상태와 동작 */
+/** useChatHistory 가 돌려주는 목록 상태와 동작 */
 export interface UseChatHistoryResult {
-  /** 화면에 그리는 내역 */
+  /** 화면에 그리는 목록 */
   history: LoadedHistory;
-  /** 가장 최근 내역. 핸들러 · 비동기 콜백이 커밋을 기다리지 않고 읽는다 */
+  /** 가장 최근 목록. 핸들러 · 응답 콜백이 다시 그리기를 기다리지 않고 읽는다 */
   historyRef: RefObject<LoadedHistory>;
-  /** 마지막 저장이 성공했는지 */
-  isStorageOk: boolean;
+  /** 마지막 저장 결과 */
+  saveResult: SaveResult;
   /**
-   * 내역을 바꾼다.
+   * 목록을 바꾼다.
    *
-   * @param shouldSave 저장소에도 바로 쓴다. 곧 다시 저장할 변경은 쓰지 않는다
+   * @param shouldSave 저장소에도 바로 쓴다 (다른 탭의 변경을 먼저 합친다). 보고 있는 대화만 바꿀 때는 쓰지 않는다 (그건 따로 남긴다)
    */
   updateHistory: (change: (history: LoadedHistory) => LoadedHistory, shouldSave?: boolean) => void;
 }
 
 /**
- * 질문 내역을 저장소에서 불러와 들고 있고, 바꿀 때 저장한다. 마지막으로 보던 대화도 맞춰 남긴다.
- * 저장은 목록 전체를 덮어쓰므로, 다른 탭이 저장하면 바로 받아 와 그 탭의 대화를 지우지 않게 한다.
+ * 대화 목록을 저장소에서 불러와 들고 있고, 바꿀 때 저장한다.
+ * 다른 탭이 저장한 목록은 storage 이벤트로 받아 합친다. 보고 있는 대화는 useChat 이 남긴다
  */
 export function useChatHistory(): UseChatHistoryResult {
   const storage = useStorage();
   const [history, setHistory] = useState<LoadedHistory>(() => loadHistory(storage));
-  const [isStorageOk, setIsStorageOk] = useState(true);
+  const [saveResult, setSaveResult] = useState<SaveResult>("saved");
   const historyRef = useRef(history);
+  // 저장에 실패한 동안에는 저장본에 없는 대화가 곧 이 탭의 새 대화라, 합치면 지운 것으로 보게 된다
+  const lastSaveRef = useRef<SaveResult>("saved");
 
+  // 답변 받기 · storage 이벤트 · 삭제 핸들러의 의존성이라 렌더마다 새로 만들지 않는다
   const updateHistory = useCallback<UseChatHistoryResult["updateHistory"]>(
     (change, shouldSave = false) => {
-      const next = change(historyRef.current);
+      const base =
+        shouldSave && lastSaveRef.current !== "failed"
+          ? mergeStoredHistory(storage, historyRef.current)
+          : historyRef.current;
+      const next = change(base);
       historyRef.current = next;
       setHistory(next);
       if (shouldSave) {
-        setIsStorageOk(saveHistory(storage, next.conversations));
+        const result = saveHistory(storage, next.conversations);
+        lastSaveRef.current = result;
+        // 줄여서 저장하면 다음 저장은 성공한다. 오래된 대화가 빠졌다는 안내가 바로 사라지지 않게 남겨 둔다
+        setSaveResult((prev) => (prev === "trimmed" && result === "saved" ? prev : result));
       }
     },
     [storage],
   );
 
-  useEffect(() => {
-    saveCurrentId(storage, history.currentId);
-  }, [storage, history.currentId]);
+  // 다른 탭이 목록을 저장하면 합친다. 합치지 않으면 이 탭이 다음에 저장할 때 다른 탭의 대화를 덮어써 지운다
+  const mergeOtherTab = useCallback(() => {
+    const { conversations } = loadHistory(storage);
+    // 저장에 실패한 동안에는 저장본에 없는 대화가 이 탭에서만 있는 대화일 수 있어 지운 것으로 보지 않는다
+    const isUnsaved = lastSaveRef.current === "failed";
+    updateHistory((h) => mergeFromOtherTab(h, conversations, isUnsaved));
+  }, [storage, updateHistory]);
+  useStorageChange(HISTORY_STORAGE_KEY, mergeOtherTab);
 
-  useEffect(
-    () =>
-      storage.subscribe((key) => {
-        if (key === HISTORY_KEY || key === null) {
-          updateHistory((h) => mergeSavedHistory(h, loadHistory(storage).conversations));
-        }
-      }),
-    [storage, updateHistory],
-  );
-
-  return { history, historyRef, isStorageOk, updateHistory };
+  return { history, historyRef, saveResult, updateHistory };
 }

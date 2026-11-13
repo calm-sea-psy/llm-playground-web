@@ -1,131 +1,110 @@
-import { memo, useEffect, useRef, useState } from "react";
-
-import { isReceiving, type Message } from "../../lib/chat";
-import { copyRich } from "../../lib/clipboard";
-import { toCopyHtml, toPlainText } from "../../lib/markdown";
-import { CopyButton } from "../CopyButton";
-import { Markdown } from "../Markdown";
-import { MessageMeta } from "../MessageMeta";
-import { AnswerCard } from "./AnswerCard";
+import { AnswerText } from "./AnswerText";
 import { ErrorMessage } from "./ErrorMessage";
-import { StatusMessage } from "./StatusMessage";
-
-/** 스크린 리더 완료 알림에 넣는 답변 앞부분 글자 수 */
-const ANNOUNCE_PREVIEW_LENGTH = 80;
-
-/** 응답 상태별 완료 알림 머리말 */
-const ANNOUNCE_PREFIX = {
-  answered: "답변 완료",
-  needs_clarification: "확인 질문",
-  abstained: "답변 보류",
-  error: "오류",
-} as const;
+import { usePendingIndicator } from "../../hooks/usePendingIndicator";
+import type { AnswerMessage } from "../../lib/chat";
+import {
+  ASK_MODE_NAMES,
+  CUT_TEXT,
+  PARTIAL_NOTE,
+  REQUEST_ERROR_TEXT,
+  WAITING_TEXT,
+  errorEventText,
+} from "../../lib/labels";
+import { SealStudy } from "../seal/SealStudy";
+import { Sources } from "../Sources";
 
 interface AssistantMessageProps {
-  message: Message;
-  /** 오류 · 중지된 답변을 같은 자리에서 다시 받는다 */
-  onRetry: (id: string) => void;
-  /** 확인 질문에서 "조건 보완해서 묻기"를 눌렀을 때 (입력창으로 옮긴다) */
-  onClarify?: () => void;
-  /** 다른 답변을 받는 중이면 다시 시도를 막는다 */
-  isBusy: boolean;
-  /** 스크린 리더에 한 번 알린다 (답변 완료 · 중지) */
-  onAnnounce?: (text: string) => void;
+  message: AnswerMessage;
 }
 
-interface AnnounceOnceOptions {
-  isLive: boolean;
-  message: Message;
-  onAnnounce: AssistantMessageProps["onAnnounce"];
+/** partial 단계로 답했는지 (단계 이름이 계약 값과 같을 때만) */
+const PARTIAL_STAGE = "partial";
+
+// 기다리는 표시의 높이. 표시를 보이기 전에도 같은 높이로 자리를 잡아 둔다
+const PENDING_HEIGHT_CLASS = "h-16";
+
+interface PendingMessageProps {
+  /** 서버의 단계 안내 문구. 아직 없으면 대기 문구 */
+  text: string;
 }
 
-/**
- * AI 답변: 기다리는 중 → 상태별 답변 카드(결론 · 근거 · 출처) 또는 오류 안내, 아래에 복사 · 메타.
- * 다시 받기는 createdAt 이 새로 찍혀 쓰는 쪽(ChatView)의 key 로 새로 만들어진다.
- */
-export const AssistantMessage = memo(AssistantMessageView);
-
-function AssistantMessageView({
-  message,
-  onRetry,
-  onClarify,
-  isBusy,
-  onAnnounce,
-}: AssistantMessageProps) {
-  // 화면에 있는 동안 응답을 받은 메시지만 알린다 (처음부터 끝난 상태로 올라온 내역은 알리지 않음).
-  // 만들어질 때 정해지고 바뀌지 않는다
-  // eslint-disable-next-line react/hook-use-state -- setter 가 필요 없다
-  const [isLive] = useState(() => isReceiving(message));
-  const bodyRef = useRef<HTMLDivElement>(null);
-
-  useAnnounceOnce({ isLive, message, onAnnounce });
-
-  if (message.status === "pending") {
-    return <StatusMessage since={message.createdAt} />;
-  }
-
-  const { response } = message;
-  const isDone = message.status === "done";
-  const totalMs =
-    message.finishedAt === undefined ? undefined : message.finishedAt - message.createdAt;
-
-  function handleCopy(): Promise<boolean> {
-    const el = bodyRef.current;
-    return el ? copyRich(toCopyHtml(el), toPlainText(el)) : Promise.resolve(false);
-  }
-
+function PendingMessage({ text }: PendingMessageProps) {
   return (
-    <div className="space-y-2">
-      <span className="sr-only">답변: </span>
-      {isDone && response ? (
-        <AnswerCard ref={bodyRef} response={response} onClarify={onClarify} />
-      ) : null}
-      {/* 저장본의 메타가 형식 검사에서 버려진 답변: 본문 글만이라도 보인다 */}
-      {isDone && !response ? <Markdown ref={bodyRef} text={message.content} /> : null}
-      {message.status === "stopped" ? (
-        <p className="flex items-center gap-2 text-xs text-zinc-500">
-          <span>중지됨</span>
-          <button
-            type="button"
-            onClick={() => onRetry(message.id)}
-            disabled={isBusy}
-            className="underline underline-offset-2 hover:text-zinc-800 disabled:opacity-40 dark:hover:text-zinc-200"
-          >
-            다시 받기
-          </button>
-        </p>
-      ) : null}
-      {message.status === "error" && message.error ? (
-        <ErrorMessage
-          error={message.error}
-          onRetry={() => onRetry(message.id)}
-          isRetryDisabled={isBusy}
-        />
-      ) : null}
-      {isDone && response ? (
-        <div className="-ml-2">
-          <CopyButton ariaLabel="답변 복사" onCopy={handleCopy} />
-        </div>
-      ) : null}
-      {response ? <MessageMeta response={response} totalMs={totalMs} /> : null}
+    <div className={`flex ${PENDING_HEIGHT_CLASS} items-center gap-3`}>
+      <SealStudy motion="always" className="size-16 shrink-0" />
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">{text}</p>
     </div>
   );
 }
 
-/** 화면에서 받은 답변이 끝나면 한 번만 알린다 (오류는 ErrorMessage 의 role="alert" 가 알린다) */
-function useAnnounceOnce({ isLive, message, onAnnounce }: AnnounceOnceOptions): void {
-  const hasAnnouncedRef = useRef(false);
-  useEffect(() => {
-    if (!isLive || hasAnnouncedRef.current || !onAnnounce) {
-      return;
-    }
-    if (message.status === "done" && message.response) {
-      hasAnnouncedRef.current = true;
-      const preview = Array.from(message.content).slice(0, ANNOUNCE_PREVIEW_LENGTH).join("");
-      onAnnounce(`${ANNOUNCE_PREFIX[message.response.status]}: ${preview}`);
-    } else if (message.status === "stopped") {
-      hasAnnouncedRef.current = true;
-      onAnnounce("답변을 중지했습니다");
-    }
-  }, [isLive, message.status, message.response, message.content, onAnnounce]);
+// 답 아래 한 줄 안내: 답변 방식(에이전트일 때) · partial 로 답함
+function notesOf(message: AnswerMessage): string[] {
+  const notes = message.mode === "agent" ? [`${ASK_MODE_NAMES.agent}로 답함`] : [];
+  return message.state === "done" && message.answer.stage?.name === PARTIAL_STAGE
+    ? [...notes, PARTIAL_NOTE]
+    : notes;
+}
+
+interface AnswerStatusProps {
+  message: AnswerMessage;
+}
+
+// 답이 끝난 모양: 중지 · 잘림 · 서버가 알린 실패 · 받지 못함. 받는 중이거나 온전히 끝났으면 그리지 않는다
+function AnswerStatus({ message }: AnswerStatusProps) {
+  switch (message.state) {
+    case "pending":
+      return null;
+    case "stopped":
+      return <p className="text-xs text-zinc-500">중지됨</p>;
+    case "done":
+      return message.cut === null ? null : (
+        <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+          {CUT_TEXT[message.cut]}
+        </p>
+      );
+    case "error":
+      return <ErrorMessage text={errorEventText(message.code, message.message)} />;
+    case "failed":
+      return <ErrorMessage text={REQUEST_ERROR_TEXT[message.failure]} />;
+  }
+}
+
+/**
+ * 답변 하나: 기다리는 중(서버의 단계 안내) → 흘려 받는 답 · 출처 → 끝난 모양(잘림 · 오류 안내).
+ * 기다리는 표시는 잠깐 기다린 뒤에 보이고(그동안 자리는 잡아 둔다), 한번 보이면 답이 와도 잠시 남는다 (usePendingIndicator).
+ * 끊겨도 받은 답은 그대로 두고 아래에 안내를 붙인다. 출처는 답 글이 있을 때만 보여 준다 (error 는 답 없이 끝난다)
+ */
+export function AssistantMessage({ message }: AssistantMessageProps) {
+  const { answer } = message;
+  const isWaiting = message.state === "pending" && answer.text === "";
+  const isPendingVisible = usePendingIndicator(isWaiting);
+  if (isPendingVisible) {
+    return <PendingMessage text={answer.stage?.message ?? WAITING_TEXT} />;
+  }
+  if (isWaiting) {
+    // 기다리는 표시를 보이기 전이라 빈 자리만 잡아 둔다. 질문을 보내며 맨 아래로 내린 뒤에
+    // 표시가 생겨 입력창 쪽으로 밀려 가려지지 않게 한다
+    return <div aria-hidden="true" className={PENDING_HEIGHT_CLASS} />;
+  }
+  const hasText = answer.text !== "";
+  const notes = notesOf(message);
+  return (
+    <div className="space-y-3">
+      {hasText ? (
+        <AnswerText
+          text={answer.text}
+          sources={answer.sources}
+          isStreaming={message.state === "pending"}
+        />
+      ) : null}
+      <AnswerStatus message={message} />
+      {notes.length > 0 ? <p className="text-xs text-zinc-500">{notes.join(" · ")}</p> : null}
+      {hasText && answer.sources.length > 0 ? (
+        <Sources
+          sources={answer.sources}
+          cited={message.state === "done" ? message.cited : undefined}
+        />
+      ) : null}
+    </div>
+  );
 }

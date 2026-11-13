@@ -1,265 +1,204 @@
-import { useCallback, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef } from "react";
 
 import { useApi } from "./useApi";
 import { useChatHistory } from "./useChatHistory";
-import { useUndoDelete } from "./useUndoDelete";
-import { QueryError } from "../api/client";
-import type { QueryResponse, RetrievalMode } from "../api/types";
+import { useStorage } from "./useStorage";
+import { useUndoDelete, type DeletedConversation } from "./useUndoDelete";
+import { RequestError, type RequestErrorCode } from "../api/client";
+import type { AskMode, AskProgress, AskRequest } from "../api/types";
 import {
-  newConversation,
   newId,
-  resendTargetOf,
-  titleFrom,
-  type AnswerError,
+  stateFromEnd,
+  withAnswerProgress,
+  withAnswerState,
+  withQuestion,
+  type AnswerState,
   type Conversation,
   type Message,
 } from "../lib/chat";
-import type { LoadedHistory } from "../lib/history";
+import { saveCurrentId, type SaveResult } from "../lib/history";
 import { logWarning } from "../lib/logger";
 
-const EMPTY: Message[] = [];
+/** 새 대화 화면의 메시지. 렌더마다 새 배열을 만들지 않는다 */
+const NO_MESSAGES: Message[] = [];
 
-/** 이 오류로 실패하면 사이드바의 서버 상태도 틀렸을 수 있어 다시 확인하게 한다 */
-const SERVER_TROUBLE_CODES = new Set<string>(["network", "timeout", "index_not_ready"]);
+/** 서버 상태를 다시 확인할 실패: 서버에 닿지 못했거나, 받다가 끊겼거나, 서버가 오래 말이 없었다 */
+const SERVER_TROUBLE: readonly RequestErrorCode[] = ["network", "interrupted", "timeout"];
 
-interface UseChatOptions {
-  /** 질문이 서버 쪽 문제(연결 실패 · 시간 초과 · 인덱스 미준비)로 실패했을 때. 받는 도중에 바뀌지 않게 고정된 함수를 넘긴다 */
+/** 답을 받는 요청 하나 (POST /ask) */
+interface AskVariables {
+  /** 답을 받는 대화 */
+  conversationId: string;
+  request: AskRequest;
+  /** 진행 이벤트를 받을 때마다 */
+  onProgress: (event: AskProgress) => void;
+  /** 사용자가 중지하면 끊는다 */
+  signal: AbortSignal;
+}
+
+/** useChat 설정 */
+export interface UseChatOptions {
+  /** 질문이 서버 문제(연결 실패 · 끊김 · 시간 초과)로 실패했을 때. 서버 상태를 바로 다시 확인하는 데 쓴다 */
   onServerTrouble?: () => void;
 }
 
-/** useChat 이 돌려주는 내역 상태와 동작 */
+/** useChat 이 돌려주는 대화 목록 상태와 동작 */
 export interface UseChatResult {
-  /** 질문을 한 번이라도 보낸 대화 (빈 새 질문은 넣지 않는다) */
+  /** 질문을 한 번이라도 보낸 대화 */
   conversations: Conversation[];
-  /** 보고 있는 대화. 없으면 빈 새 질문 화면 */
+  /** 보고 있는 대화. 없으면 새 대화 화면 */
   currentId: string | undefined;
-  /** 보고 있는 대화의 메시지 (새 질문 화면이면 빈 배열) */
+  /** 보고 있는 대화의 메시지 */
   messages: Message[];
-  /** 받는 중인 대화 id (없으면 쉬는 중) */
+  /** 답변을 받는 중인 대화. 요청은 한 번에 하나다 */
   activeId: string | undefined;
+  /** 답변을 받는 중 (어느 대화든) */
   isBusy: boolean;
-  /** 마지막 저장이 성공했는지 */
-  isStorageOk: boolean;
-  /** 방금 지워서 실행 취소할 수 있는 대화 */
-  lastDeleted: Conversation | undefined;
-  /** 보고 있는 대화에 질문을 보낸다. 받는 중이거나 빈 질문이면 false */
-  send: (text: string, retrievalMode: RetrievalMode) => boolean;
-  /** 오류 · 중지된 답변을 같은 자리에서 다시 받는다 */
-  retry: (assistantId: string) => void;
+  /** 마지막 저장 결과 */
+  saveResult: SaveResult;
+  /** 지운 뒤 아직 실행 취소를 받는 대화들 (지운 순서) */
+  recentlyDeleted: DeletedConversation[];
+  /** 보고 있는 대화에 질문을 보낸다. 받는 중이거나 빈 질문이면 보내지 않고 false */
+  send: (question: string, mode: AskMode) => boolean;
+  /** 받는 중인 답변을 멈춘다. 받은 만큼은 남는다 */
   stop: () => void;
-  /** 빈 새 질문 화면 = 다음 질문부터 새 세션 (받던 답변은 원래 대화에서 계속 받는다) */
+  /** 새 대화 화면. 받던 답변은 원래 대화에서 계속 받는다 */
   newChat: () => void;
+  /** 다른 대화를 연다 */
   select: (id: string) => void;
-  /** 대화를 지운다 (받는 중인 대화는 지울 수 없다) */
+  /** 대화를 지운다. 받는 중인 대화는 지우지 않는다 */
   remove: (id: string) => void;
-  undoRemove: () => void;
+  /** 지운 대화 하나를 되돌린다. 실행 취소 시간이 지났으면 아무 일도 없다 */
+  undoRemove: (id: string) => void;
 }
 
 /**
- * 질문 내역 전체와 전송 · 중지 · 다시 시도 · 대화 전환 · 삭제.
- * - 대화 하나 = 서버 세션 하나. 첫 질문 때 세션 id 를 받아 대화에 저장하고, 이후 질문은 같은 id 로 보낸다
- *   (내역에서 예전 대화를 골라 이어 물어도 그 대화의 세션으로 간다)
- * - 요청은 한 번에 하나. 받는 도중 다른 대화로 옮겨도 답변은 원래 대화에서 계속 받는다
- * - 저장소에는 질문을 보낼 때(새 대화는 세션 id 를 받은 때) · 응답 · 오류 · 중지 · 삭제 때 쓴다
+ * 대화 목록과 보내기 · 중지 · 대화 전환 · 삭제.
+ * - 대화는 브라우저에만 있다. 서버(/ask)는 질문마다 따로 답하고 앞 대화를 기억하지 않는다
+ * - 답은 이벤트가 올 때마다 화면에 더한다. 저장소에는 보낼 때와 끝날 때만 쓴다 (조각마다 쓰지 않는다)
  */
 export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult {
   const api = useApi();
-  const { history, historyRef, isStorageOk, updateHistory } = useChatHistory();
+  const storage = useStorage();
+  const { history, historyRef, saveResult, updateHistory } = useChatHistory();
   const {
-    lastDeleted,
+    recentlyDeleted,
     remove: removeConversation,
     undoRemove,
   } = useUndoDelete({ historyRef, updateHistory });
-  const [activeId, setActiveId] = useState<string>();
+  // 답을 받는 요청. 받는 중인 대화(activeId)는 이 요청 상태에서 읽는다
+  const ask = useMutation({
+    mutationFn: ({ request, onProgress, signal }: AskVariables) =>
+      api.ask(request, onProgress, signal),
+    // 브라우저가 오프라인이라고 해도 멈추지 않고 network 오류로 끝낸다
+    networkMode: "always",
+  });
+  // 중지할 요청. 같은 렌더 안에서 두 번 불려도 한 번만 보내도록 보내기 여부도 이것으로 본다
+  const controllerRef = useRef<AbortController | null>(null);
 
-  // 언마운트 때 받던 요청을 중지하지 않는다: 개발 모드 StrictMode 는 이펙트를 한 번 더 정리 · 실행하는데,
-  // 첫 이펙트 처리가 늦으면(숨겨진 탭에서 막 열었을 때 등) 그사이 시작된 요청이 중지되었다.
-  // 앱은 페이지를 닫을 때만 사라지고, 그때는 브라우저가 요청을 끊는다.
-  const controllerRef = useRef<AbortController>(undefined);
+  const current = history.conversations.find((c) => c.id === history.currentId);
+  // 목록에 없는 대화(저장에 실패한 채 새로고침 등)는 새 대화 화면으로 연다
+  const currentId = current?.id;
+  const activeId = ask.isPending ? ask.variables.conversationId : undefined;
 
-  /** 메시지 하나만 바꾸고 대화의 마지막 활동 시각을 맞춘다 (나머지 메시지 객체는 그대로 → memo 된 컴포넌트는 다시 그리지 않는다) */
-  const updateMessage = useCallback(
-    (
-      conversationId: string,
-      messageId: string,
-      change: (m: Message) => Message,
-      shouldSave = false,
-    ) => {
-      updateHistory(
-        (h) => ({
-          ...h,
-          conversations: h.conversations.map((c) =>
-            c.id === conversationId
-              ? {
-                  ...c,
-                  updatedAt: Date.now(),
-                  messages: c.messages.map((m) => (m.id === messageId ? change(m) : m)),
-                }
-              : c,
-          ),
-        }),
-        shouldSave,
-      );
-    },
-    [updateHistory],
-  );
+  useEffect(() => {
+    saveCurrentId(storage, currentId);
+  }, [storage, currentId]);
 
-  /** 대화의 세션 id. 없으면 새로 받아 대화에 저장한다 */
-  const sessionOf = useCallback(
-    async (conversationId: string, signal: AbortSignal): Promise<string> => {
-      const existing = historyRef.current.conversations.find(
-        (c) => c.id === conversationId,
-      )?.sessionId;
-      if (existing) {
-        return existing;
+  function finish(conversationId: string, answerId: string, next: AnswerState): void {
+    updateHistory(
+      (h) => ({
+        ...h,
+        conversations: withAnswerState(h.conversations, conversationId, answerId, next, Date.now()),
+      }),
+      true,
+    );
+  }
+
+  async function receive(
+    conversationId: string,
+    answerId: string,
+    request: AskRequest,
+    controller: AbortController,
+  ): Promise<void> {
+    // 조각마다 다시 그리되 저장하지는 않는다 (끝날 때 finish 가 저장한다)
+    const onProgress = (event: AskProgress): void => {
+      updateHistory((h) => ({
+        ...h,
+        conversations: withAnswerProgress(h.conversations, conversationId, answerId, event),
+      }));
+    };
+    try {
+      const end = await ask.mutateAsync({
+        conversationId,
+        request,
+        onProgress,
+        signal: controller.signal,
+      });
+      if (end.event === "error") {
+        logWarning(`서버가 답을 못 만들었다고 알렸다 (${end.code})`);
       }
-      const sessionId = await api.createSession(signal);
-      updateHistory(
-        (h) => ({
-          ...h,
-          conversations: h.conversations.map((c) =>
-            c.id === conversationId ? { ...c, sessionId } : c,
-          ),
-        }),
-        true,
-      );
-      return sessionId;
-    },
-    [api, historyRef, updateHistory],
-  );
-
-  /** 대화의 assistantId 메시지에 question 의 답변을 받아 채운다 */
-  const run = useCallback(
-    async (
-      conversationId: string,
-      assistantId: string,
-      question: string,
-      retrievalMode: RetrievalMode,
-    ) => {
-      const controller = new AbortController();
-      controllerRef.current = controller;
-      setActiveId(conversationId);
-      const update = (change: (m: Message) => Message): void => {
-        updateMessage(conversationId, assistantId, change, true);
-      };
-      try {
-        const sessionId = await sessionOf(conversationId, controller.signal);
-        const res = await api.query({ question, retrievalMode, sessionId }, controller.signal);
-        if (res.status === "error") {
-          // error_code 는 로그용. 화면에는 코드별 사용자용 안내만 보인다
-          logWarning("서버가 오류로 답했다", {
-            requestId: res.requestId,
-            errorCode: res.errorCode,
-            reason: res.reason,
-          });
-        }
-        update((m) => finishWith(m, res));
-        if (res.errorCode && SERVER_TROUBLE_CODES.has(res.errorCode)) {
+      finish(conversationId, answerId, stateFromEnd(end));
+    } catch (e) {
+      const code = e instanceof RequestError ? e.code : "bad_response";
+      if (code === "aborted") {
+        finish(conversationId, answerId, { state: "stopped" });
+      } else {
+        logWarning("질문 요청이 실패했다", e);
+        finish(conversationId, answerId, { state: "failed", failure: code });
+        if (SERVER_TROUBLE.includes(code)) {
           onServerTrouble?.();
         }
-      } catch (e) {
-        if (e instanceof QueryError && e.code === "aborted") {
-          update((m) => ({ ...m, status: "stopped", finishedAt: Date.now() }));
-        } else {
-          logWarning("질문 요청 실패", e); // 화면에는 code 별 안내만 남아 원본은 여기서 본다
-          const error = toAnswerError(e);
-          update((m) => ({ ...m, status: "error", error, finishedAt: Date.now() }));
-          if (SERVER_TROUBLE_CODES.has(error.code)) {
-            onServerTrouble?.();
-          }
-        }
-      } finally {
-        if (controllerRef.current === controller) {
-          controllerRef.current = undefined;
-          setActiveId(undefined);
-        }
       }
-    },
-    [api, sessionOf, updateMessage, onServerTrouble],
-  );
-
-  const send = useCallback(
-    (text: string, retrievalMode: RetrievalMode): boolean => {
-      const trimmed = text.trim();
-      if (!trimmed || controllerRef.current) {
-        return false;
+    } finally {
+      if (controllerRef.current === controller) {
+        controllerRef.current = null;
       }
-      const now = Date.now();
-      const user: Message = {
-        id: newId(),
-        role: "user",
-        content: trimmed,
-        status: "done",
-        createdAt: now,
-      };
-      const assistant: Message = {
-        id: newId(),
-        role: "assistant",
-        content: "",
-        status: "pending",
-        createdAt: now,
-        retrievalMode,
-      };
-      const { conversations, currentId } = historyRef.current;
-      const existing = conversations.find((c) => c.id === currentId);
-      const base = existing ?? newConversation();
-      const conversation: Conversation = {
-        ...base,
-        title: base.title || titleFrom(trimmed),
-        updatedAt: now,
-        messages: [...base.messages, user, assistant],
-      };
-      // 답변 도중 탭이 닫혀도 질문은 남도록 바로 저장한다. 세션이 없으면 sessionOf 가 id 를 받아 함께 저장한다
-      // (내역 전체를 쓰는 일이라 같은 내용을 두 번 쓰지 않는다)
-      updateHistory(
-        (h) => ({
-          currentId: conversation.id,
-          conversations: existing
-            ? h.conversations.map((c) => (c.id === conversation.id ? conversation : c))
-            : [conversation, ...h.conversations],
-        }),
-        conversation.sessionId !== undefined,
-      );
-      void run(conversation.id, assistant.id, trimmed, retrievalMode);
-      return true;
-    },
-    [historyRef, run, updateHistory],
-  );
+    }
+  }
 
-  const retry = useCallback(
-    (assistantId: string) => {
-      if (controllerRef.current) {
-        return;
-      }
-      const conversation = currentConversation(historyRef.current);
-      const target = conversation && resendTargetOf(conversation.messages, assistantId);
-      if (!conversation || !target) {
-        return;
-      }
-      updateMessage(conversation.id, assistantId, (m) => ({
-        id: m.id,
-        role: "assistant",
-        content: "",
-        status: "pending",
-        // 화면은 이 값이 바뀌는 것을 보고 메시지를 새로 만든다 (ChatView 의 key). 같은 ms 여도 반드시 바꾼다
-        createdAt: Math.max(Date.now(), m.createdAt + 1),
-        retrievalMode: target.retrievalMode,
-      }));
-      void run(conversation.id, assistantId, target.question, target.retrievalMode);
-    },
-    [historyRef, run, updateMessage],
-  );
+  function send(question: string, mode: AskMode): boolean {
+    const text = question.trim();
+    if (text === "" || controllerRef.current !== null) {
+      return false;
+    }
+    const id = currentId ?? newId();
+    const answerId = newId();
+    const conversation = withQuestion(
+      historyRef.current.conversations.find((c) => c.id === id),
+      { conversationId: id, questionId: newId(), answerId, text, mode, now: Date.now() },
+    );
+    // 답을 받는 도중 탭이 닫혀도 질문은 남도록 바로 저장한다
+    updateHistory(
+      (h) => ({
+        currentId: id,
+        conversations: [conversation, ...h.conversations.filter((c) => c.id !== id)],
+      }),
+      true,
+    );
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    void receive(id, answerId, { question: text, mode }, controller);
+    return true;
+  }
 
-  const stop = useCallback(() => controllerRef.current?.abort(), []);
+  function stop(): void {
+    controllerRef.current?.abort();
+  }
 
-  const newChat = useCallback(
-    () => updateHistory((h) => ({ ...h, currentId: undefined })),
-    [updateHistory],
-  );
+  function newChat(): void {
+    updateHistory((h) => ({ ...h, currentId: undefined }));
+  }
 
+  // select · remove 는 memo 된 HistoryList 에 넘기므로 렌더마다 새로 만들지 않는다 (입력할 때마다 목록을 다시 그리지 않게)
   const select = useCallback(
-    (id: string) => updateHistory((h) => ({ ...h, currentId: id })),
-    [updateHistory],
+    (id: string) => {
+      if (id !== historyRef.current.currentId) {
+        updateHistory((h) => ({ ...h, currentId: id }));
+      }
+    },
+    [historyRef, updateHistory],
   );
 
   const remove = useCallback(
@@ -273,45 +212,17 @@ export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult
 
   return {
     conversations: history.conversations,
-    currentId: history.currentId,
-    messages: currentConversation(history)?.messages ?? EMPTY,
+    currentId,
+    messages: current?.messages ?? NO_MESSAGES,
     activeId,
     isBusy: activeId !== undefined,
-    isStorageOk,
-    lastDeleted,
+    saveResult,
+    recentlyDeleted,
     send,
-    retry,
     stop,
     newChat,
     select,
     remove,
     undoRemove,
   };
-}
-
-function currentConversation({
-  conversations,
-  currentId,
-}: LoadedHistory): Conversation | undefined {
-  return conversations.find((c) => c.id === currentId);
-}
-
-/** 응답으로 답변을 마무리한다. 서버 status 가 "error" 면 오류 메시지, 나머지 셋은 done */
-function finishWith(message: Message, res: QueryResponse): Message {
-  const finished = { ...message, finishedAt: Date.now(), response: res };
-  return res.status === "error"
-    ? {
-        ...finished,
-        status: "error",
-        // 계약상 status=error 면 error_code 가 반드시 있다 (schemas.ts 가 검사). 그래도 없으면 일반 안내
-        error: { code: res.errorCode ?? "unknown", message: res.reason },
-      }
-    : { ...finished, status: "done", content: res.answer };
-}
-
-function toAnswerError(e: unknown): AnswerError {
-  if (e instanceof QueryError) {
-    return { code: e.code, message: e.message };
-  }
-  return { code: "unknown", message: e instanceof Error ? e.message : String(e) };
 }
