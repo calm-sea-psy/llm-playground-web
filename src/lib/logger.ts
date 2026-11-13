@@ -17,11 +17,6 @@ const MAX_TRACKED_LOGS = 100;
 
 type ClientLogError = NonNullable<ClientLog["error"]>;
 
-interface LogContext {
-  /** 서버 응답의 request_id. 백엔드 기록과 맞춰 볼 때 쓴다 */
-  requestId?: string;
-}
-
 // history · storage 처럼 React 밖에서도 부르는 로거라 Provider 로 주입하지 않고 모듈에 둔다
 const lastSentAt = new Map<string, number>();
 
@@ -102,21 +97,16 @@ function sendToLogServer(log: ClientLog): void {
  * 화면에 알릴 필요는 없지만 원인을 추적할 때 볼 내용(error_code · 요청 실패 원인)을 남긴다.
  * 콘솔에 나오고, 배포 빌드에서는 로그 서버에도 남는다. 테스트 출력에는 나오지 않는다.
  *
- * @param message 서버 로그에 그대로 남고 같은 오류를 묶는 기준이 된다. 질문 · 답변 · 세션 id 나 요청마다 달라지는 값을 넣지 않는다
+ * @param message 서버 로그에 그대로 남고 같은 오류를 묶는 기준이 된다. 질문 · 답변 · 대화 id 나 요청마다 달라지는 값을 넣지 않는다
  * @param cause 원본 예외처럼 함께 볼 값. 콘솔에는 그대로 나오고, 서버에는 오류 요약만 간다 (오류가 아닌 값은 보내지 않는다)
  */
-export function logWarning(message: string, cause?: unknown, context?: LogContext): void {
+export function logWarning(message: string, cause?: unknown): void {
   if (import.meta.env.MODE === "test") {
     return;
   }
   console.warn(message, cause);
   if (import.meta.env.PROD) {
-    sendToLogServer({
-      level: "warn",
-      message,
-      requestId: context?.requestId?.slice(0, NAME_MAX_LENGTH),
-      error: summarizeExpected(cause),
-    });
+    sendToLogServer({ level: "warn", message, error: summarizeExpected(cause) });
   }
 }
 
