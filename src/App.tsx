@@ -1,6 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 
-import type { AskMode } from "./api/types";
 import { AppHeader } from "./components/AppHeader";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
@@ -12,7 +11,7 @@ import { useDraft } from "./hooks/useDraft";
 import { useDrawer } from "./hooks/useDrawer";
 import { useHealth } from "./hooks/useHealth";
 import { useTheme } from "./hooks/useTheme";
-import { DEFAULT_ASK_MODE } from "./lib/config";
+import { ASK_MODE } from "./lib/config";
 
 /** 다른 대화가 답변을 받는 동안 입력창 아래 안내 (요청은 한 번에 하나) */
 const BUSY_ELSEWHERE_HINT = "다른 대화의 답변을 받는 중입니다. 끝나면 보낼 수 있습니다";
@@ -20,7 +19,7 @@ const BUSY_ELSEWHERE_HINT = "다른 대화의 답변을 받는 중입니다. 끝
 /** 새 대화 화면의 입력 초안 키 (대화 id 는 UUID 라 겹치지 않는다) */
 const NEW_CHAT_DRAFT_KEY = "new";
 
-/** 위키 Q&A 화면: 사이드바(새 대화 · 대화 목록 · 서버 상태) + 머리줄(답변 방식 · 테마) + 대화 + 입력창 */
+/** 위키 Q&A 화면: 사이드바(새 대화 · 대화 목록 · 서버 상태) + 머리줄(테마) + 대화 + 입력창 */
 export function App() {
   const { health, recheck } = useHealth();
   const chat = useChat({ onServerTrouble: recheck });
@@ -36,7 +35,6 @@ export function App() {
   const { draft, setDraft, replaceDraft, canUndoReplace, undoReplace } = useDraft(
     chat.currentId ?? NEW_CHAT_DRAFT_KEY,
   );
-  const [mode, setMode] = useState<AskMode>(DEFAULT_ASK_MODE);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // 요청은 한 번에 하나: 보고 있는 대화가 받는 중이면 중지 버튼, 다른 대화가 받는 중이면 보내지 않는다
@@ -108,9 +106,6 @@ export function App() {
           isDrawerOpen={isDrawerOpen}
           onOpenDrawer={openDrawer}
           drawerTriggerRef={triggerRef}
-          mode={mode}
-          onModeChange={setMode}
-          isModeDisabled={chat.isBusy}
           theme={theme}
           onThemeChange={setTheme}
         />
@@ -124,7 +119,7 @@ export function App() {
         <Composer
           value={draft}
           onChange={setDraft}
-          onSend={(text) => chat.send(text, mode)}
+          onSend={(text) => chat.send(text, ASK_MODE)}
           onStop={chat.stop}
           isBusy={isBusyHere}
           isDisabled={isBusyElsewhere}

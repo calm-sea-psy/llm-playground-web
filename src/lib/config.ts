@@ -39,10 +39,10 @@ export const PENDING_SHOW_DELAY_MS = 300;
 export const PENDING_MIN_VISIBLE_MS = 500;
 
 /**
- * 처음 고른 답변 방식. 에이전트 모드는 단발로 먼저 답하고, 못 찾았거나 부분 답 구간일 때만
+ * 화면이 /ask 에 보내는 답변 방식. 에이전트 모드는 단발로 먼저 답하고, 못 찾았거나 부분 답 구간일 때만
  * 에이전트 그래프(질문 나누기 → 검색 → 판단)로 넘어간다. 쉬운 질문은 단발과 같고 복합 질문만 더 걸린다
  */
-export const DEFAULT_ASK_MODE: AskMode = "agent";
+export const ASK_MODE: AskMode = "agent";
 
 /** 대화 목록 저장소 키. 저장 모양이 바뀌면 버전을 올린다 (v1 은 /query 시절 모양) */
 export const HISTORY_STORAGE_KEY = "llm-playground:conversations:v2";

@@ -8,7 +8,7 @@
 %%{init: {"theme": "base", "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 30, "rankSpacing": 40}, "themeVariables": {"fontSize": "14px", "lineColor": "#94A3B8", "clusterBkg": "#FFFFFF", "clusterBorder": "#CBD5E1", "edgeLabelBackground": "#FFFFFF", "primaryTextColor": "#334155"}}}%%
 
 flowchart TD
-    IN(["질문 · 답변 방식 · Composer"]):::io
+    IN(["질문 · Composer"]):::io
 
     subgraph S1["① 대화 · hooks/"]
         A1["useChat<br/>보내기 · 중지 · 진행 이벤트 반영"]:::s1
@@ -167,9 +167,9 @@ docker compose는 `.env`를, 개발 서버는 `.env` · `.env.local`을 읽습�
 
 ## 화면
 
-| 경로 | 화면         | 설명                                                                                     |
-| ---- | ------------ | ---------------------------------------------------------------------------------------- |
-| `/`  | 위키백과 Q&A | 답변 방식(단발 · 에이전트) · 질문 입력 · 흘러 들어오는 답 · 출처 · 대화 목록 · 서버 상태 |
+| 경로 | 화면         | 설명                                                        |
+| ---- | ------------ | ----------------------------------------------------------- |
+| `/`  | 위키백과 Q&A | 질문 입력 · 흘러 들어오는 답 · 출처 · 대화 목록 · 서버 상태 |
 
 | 받은 것               | 화면                                                                                                       |
 | --------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -184,11 +184,11 @@ docker compose는 `.env`를, 개발 서버는 `.env` · `.env.local`을 읽습�
 
 계약은 wiki의 `contracts/`를 복사해 둔 [contracts/](contracts/)이고, 따라가는 계약 버전은 `package.json`의 `wikiContract`입니다. 이벤트 세부는 wiki의 `src/playground_wiki/api/README.md`에 있습니다.
 
-| 메서드 | 경로                      | 내용                                                                                                                                         |
-| ------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/health`                 | 30초마다 확인. `{"status", "collection", "chunks", "qdrant"}` — 사이드바 "서버 정상"과 그 아래 "Qdrant (local · cloud)" (목업은 위치 없음)   |
-| POST   | `/ask?mode=single\|agent` | `{"question"}`(1~300자) → `text/event-stream`. 화면은 `fetch` 본문 스트림을 `event:` · `data:` 줄로 나눠 읽음 (POST라 `EventSource`는 못 씀) |
-| POST   | `/search`                 | 화면은 부르지 않음. 개발 서버 · nginx가 같은 주소로 넘김                                                                                     |
+| 메서드 | 경로                      | 내용                                                                                                                                                                                                                                         |
+| ------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/health`                 | 30초마다 확인. `{"status", "collection", "chunks", "qdrant"}` — 사이드바 "서버 정상"과 그 아래 "Qdrant (local · cloud)" (목업은 위치 없음)                                                                                                   |
+| POST   | `/ask?mode=single\|agent` | `{"question"}`(1~300자) → `text/event-stream`. 화면은 늘 `mode=agent`로 보냄 (단발로 먼저 답하고, 못 찾았거나 부분 답 구간일 때만 에이전트로 넘어감). `fetch` 본문 스트림을 `event:` · `data:` 줄로 나눠 읽음 (POST라 `EventSource`는 못 씀) |
+| POST   | `/search`                 | 화면은 부르지 않음. 개발 서버 · nginx가 같은 주소로 넘김                                                                                                                                                                                     |
 
 `/ask` 이벤트는 `stage`(`stage` · `message`) · `sources`(`number` · `title` · `section` · `url` · `score`) · `delta`(`text`) · `done`(`cited` · `truncated` · `timed_out` · `failed` · 진단) · `error`(`code` · `message`)이고, `done` · `error`는 마지막에 한 번만 옵니다.
 
