@@ -1,6 +1,6 @@
 // 답 속 출처 번호 "[n]" 을 마크다운 트리(mdast)에서 출처 링크로 바꾸는 remark 플러그인. React 를 쓰지 않는다.
 
-import { sourceHref } from "./chat";
+import { sourceHref, sourceLabel } from "./sources";
 import type { Source } from "../api/types";
 
 /** 출처 번호 표시. split 에 쓰려고 번호를 묶는다 */
@@ -55,7 +55,7 @@ function splitText(value: string, sources: Source[]): MarkdownNode[] {
     nodes.push({
       type: "link",
       url: href,
-      title: source.section ? `${source.title} › ${source.section}` : source.title,
+      title: sourceLabel(source),
       children: [{ type: "text", value: `[${part}]` }],
       data: { hProperties: { dataCitation: true } },
     });

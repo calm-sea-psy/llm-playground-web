@@ -162,11 +162,6 @@ export function hasPendingAnswer(messages: Message[]): boolean {
   return messages.some((m) => m.role === "assistant" && m.state === "pending");
 }
 
-/** 출처 링크 주소. http · https 가 아니면(javascript: 등) 링크로 쓰지 않고 undefined */
-export function sourceHref(source: Source): string | undefined {
-  return /^https?:\/\//i.test(source.url) ? source.url : undefined;
-}
-
 /** 질문 하나를 보낼 때 쓰는 id 와 시각. 부르는 쪽이 만들어 넘겨 함수는 순수하게 둔다 */
 export interface QuestionDraft {
   conversationId: string;
