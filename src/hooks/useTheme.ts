@@ -5,7 +5,10 @@ import { useStorage } from "./useStorage";
 import { useStorageChange } from "./useStorageChange";
 import { THEME_STORAGE_KEY } from "../lib/config";
 import { THEMES, type Theme } from "../lib/labels";
-import { readItem, writeItem, type KeyValueStorage } from "../lib/storage";
+import { readItem, writeItem, type KeyValueStorage, type StorageSlot } from "../lib/storage";
+
+/** 고른 테마 자리. "시스템"이면 비워 둔다 */
+const THEME_SLOT: StorageSlot = { key: THEME_STORAGE_KEY, what: "테마" };
 
 /** useTheme 이 돌려주는 선택값과 변경 함수 */
 export interface UseThemeResult {
@@ -14,7 +17,7 @@ export interface UseThemeResult {
 }
 
 function readTheme(storage: KeyValueStorage): Theme {
-  const value = readItem(storage, THEME_STORAGE_KEY, "테마");
+  const value = readItem(storage, THEME_SLOT);
   return THEMES.find((t) => t !== "system" && t === value) ?? "system";
 }
 
@@ -42,7 +45,7 @@ export function useTheme(): UseThemeResult {
   function selectTheme(next: Theme): void {
     setTheme(next);
     // "시스템"은 저장하지 않는다 (지운다). 못 써도 지금 화면에는 적용된다
-    writeItem(storage, THEME_STORAGE_KEY, next === "system" ? undefined : next, "테마");
+    writeItem(storage, THEME_SLOT, next === "system" ? undefined : next);
   }
 
   return { theme, setTheme: selectTheme };

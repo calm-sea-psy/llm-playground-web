@@ -14,7 +14,7 @@ import {
 } from "./chat";
 import { CURRENT_STORAGE_KEY, HISTORY_STORAGE_KEY, MAX_CONVERSATIONS } from "./config";
 import { logWarning } from "./logger";
-import { readItem, writeItem, type KeyValueStorage } from "./storage";
+import { readItem, writeItem, type KeyValueStorage, type StorageSlot } from "./storage";
 import { REQUEST_ERROR_CODES } from "../api/client";
 import { sourceSchema } from "../api/schemas";
 import { ASK_MODES } from "../api/types";
@@ -27,6 +27,12 @@ const SHRINK_RATIO = 0.8;
 
 /** 저장소 용량 초과 예외 이름. NS_ERROR_DOM_QUOTA_REACHED 는 구버전 Firefox 가 쓴다 */
 const QUOTA_ERROR_NAMES: readonly string[] = ["QuotaExceededError", "NS_ERROR_DOM_QUOTA_REACHED"];
+
+/** 대화 목록 저장본 자리 */
+const HISTORY_SLOT: StorageSlot = { key: HISTORY_STORAGE_KEY, what: "대화 목록" };
+
+/** 보고 있는 대화 id 자리 */
+const CURRENT_SLOT: StorageSlot = { key: CURRENT_STORAGE_KEY, what: "보고 있는 대화" };
 
 /** 저장 결과. trimmed 는 보관 한도(대화 수 MAX_CONVERSATIONS · 저장소 용량)를 넘어 오래된 대화 일부를 저장본에서 뺀 경우다 */
 export type SaveResult = "saved" | "trimmed" | "failed";
@@ -140,8 +146,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 /** 저장된 대화 목록을 불러온다. 깨진 대화 · 메시지는 버리고 나머지는 살린다 */
 export function loadHistory(storage: KeyValueStorage): LoadedHistory {
-  const raw = readItem(storage, HISTORY_STORAGE_KEY, "대화 목록");
-  const current = readItem(storage, CURRENT_STORAGE_KEY, "보고 있던 대화");
+  const raw = readItem(storage, HISTORY_SLOT);
+  const current = readItem(storage, CURRENT_SLOT);
   const conversations = readConversations(readList(raw) ?? []);
   const currentId = current !== null && current !== "" ? current : undefined;
   return { conversations, currentId };
@@ -159,7 +165,7 @@ export function saveHistory(storage: KeyValueStorage, conversations: Conversatio
   for (;;) {
     try {
       storage.setItem(
-        HISTORY_STORAGE_KEY,
+        HISTORY_SLOT.key,
         JSON.stringify({ version: HISTORY_VERSION, conversations: keep }),
       );
       return result;
@@ -177,7 +183,7 @@ export function saveHistory(storage: KeyValueStorage, conversations: Conversatio
 /** 보고 있는 대화를 남긴다 (새로고침하면 다시 연다). 없으면 새 대화 화면 */
 export function saveCurrentId(storage: KeyValueStorage, id: string | undefined): void {
   // 못 남겨도 새로고침하면 새 대화 화면으로 열릴 뿐이다
-  writeItem(storage, CURRENT_STORAGE_KEY, id, "보고 있는 대화");
+  writeItem(storage, CURRENT_SLOT, id);
 }
 
 /** 최신 활동순으로 정렬한 새 배열 */
@@ -219,6 +225,6 @@ export function mergeFromOtherTab(
  * 저장본이 없거나 읽을 수 없으면 그대로 돌려준다 (빈 목록과 합치면 이 탭의 대화를 지운 것으로 보게 된다)
  */
 export function mergeStoredHistory(storage: KeyValueStorage, local: LoadedHistory): LoadedHistory {
-  const list = readList(readItem(storage, HISTORY_STORAGE_KEY, "대화 목록"));
+  const list = readList(readItem(storage, HISTORY_SLOT));
   return list === undefined ? local : mergeFromOtherTab(local, readConversations(list));
 }

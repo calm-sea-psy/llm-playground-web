@@ -13,6 +13,7 @@ import {
   withAnswerProgress,
   withAnswerState,
   withQuestion,
+  type AnswerRef,
   type AnswerState,
   type Conversation,
   type Message,
@@ -35,6 +36,13 @@ interface AskVariables {
   onProgress: (event: AskProgress) => void;
   /** 사용자가 중지하면 끊는다 */
   signal: AbortSignal;
+}
+
+/** 보낸 질문의 답을 받는 데 필요한 것 (receive) */
+interface Reception extends AnswerRef {
+  request: AskRequest;
+  /** 이 요청을 끊는 데 쓴다. 사용자의 중지 버튼이 abort 한다 */
+  controller: AbortController;
 }
 
 /** useChat 설정 */
@@ -106,27 +114,33 @@ export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult
     saveCurrentId(storage, currentId);
   }, [storage, currentId]);
 
-  function finish(conversationId: string, answerId: string, next: AnswerState): void {
+  function finish({ conversationId, answerId }: AnswerRef, next: AnswerState): void {
     updateHistory(
       (h) => ({
         ...h,
-        conversations: withAnswerState(h.conversations, conversationId, answerId, next, Date.now()),
+        conversations: withAnswerState(h.conversations, {
+          conversationId,
+          answerId,
+          next,
+          now: Date.now(),
+        }),
       }),
       true,
     );
   }
 
-  async function receive(
-    conversationId: string,
-    answerId: string,
-    request: AskRequest,
-    controller: AbortController,
-  ): Promise<void> {
+  async function receive({
+    conversationId,
+    answerId,
+    request,
+    controller,
+  }: Reception): Promise<void> {
+    const ref = { conversationId, answerId };
     // 조각마다 다시 그리되 저장하지는 않는다 (끝날 때 finish 가 저장한다)
     const onProgress = (event: AskProgress): void => {
       updateHistory((h) => ({
         ...h,
-        conversations: withAnswerProgress(h.conversations, conversationId, answerId, event),
+        conversations: withAnswerProgress(h.conversations, { ...ref, progress: event }),
       }));
     };
     try {
@@ -139,14 +153,14 @@ export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult
       if (end.event === "error") {
         logWarning(`서버가 답을 못 만들었다고 알렸다 (${end.code})`);
       }
-      finish(conversationId, answerId, stateFromEnd(end));
+      finish(ref, stateFromEnd(end));
     } catch (e) {
       const code = e instanceof RequestError ? e.code : "bad_response";
       if (code === "aborted") {
-        finish(conversationId, answerId, { state: "stopped" });
+        finish(ref, { state: "stopped" });
       } else {
         logWarning("질문 요청이 실패했다", e);
-        finish(conversationId, answerId, { state: "failed", failure: code });
+        finish(ref, { state: "failed", failure: code });
         if (SERVER_TROUBLE.includes(code)) {
           onServerTrouble?.();
         }
@@ -179,7 +193,12 @@ export function useChat({ onServerTrouble }: UseChatOptions = {}): UseChatResult
     );
     const controller = new AbortController();
     controllerRef.current = controller;
-    void receive(id, answerId, { question: text, mode }, controller);
+    void receive({
+      conversationId: id,
+      answerId,
+      request: { question: text, mode },
+      controller,
+    });
     return true;
   }
 

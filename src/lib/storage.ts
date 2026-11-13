@@ -22,12 +22,15 @@ export function createBrowserStorage(): KeyValueStorage {
   };
 }
 
-/**
- * 값을 읽는다. 읽을 수 없는 환경이면 로그를 남기고 null (값이 없는 것과 같이 다룬다)
- *
- * @param what 로그에 남길 대상 이름 (예: "테마")
- */
-export function readItem(storage: KeyValueStorage, key: string, what: string): string | null {
+/** 저장소에 둔 값 하나의 자리: 키와, 읽기 · 쓰기에 실패했을 때 로그에 남길 이름 */
+export interface StorageSlot {
+  key: string;
+  /** 로그에 남길 대상 이름 (예: "테마") */
+  what: string;
+}
+
+/** 값을 읽는다. 읽을 수 없는 환경이면 로그를 남기고 null (값이 없는 것과 같이 다룬다) */
+export function readItem(storage: KeyValueStorage, { key, what }: StorageSlot): string | null {
   try {
     return storage.getItem(key);
   } catch (e) {
@@ -36,16 +39,11 @@ export function readItem(storage: KeyValueStorage, key: string, what: string): s
   }
 }
 
-/**
- * 값을 쓴다. value 가 undefined 면 지운다. 쓸 수 없는 환경이면 로그를 남기고 false (화면은 그대로 동작한다)
- *
- * @param what 로그에 남길 대상 이름 (예: "테마")
- */
+/** 값을 쓴다. value 가 undefined 면 지운다. 쓸 수 없는 환경이면 로그를 남기고 false (화면은 그대로 동작한다) */
 export function writeItem(
   storage: KeyValueStorage,
-  key: string,
+  { key, what }: StorageSlot,
   value: string | undefined,
-  what: string,
 ): boolean {
   try {
     if (value === undefined) {
